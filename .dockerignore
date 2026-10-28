@@ -1,0 +1,10 @@
+.git
+.venv
+.env
+.env.*
+data
+artifacts
+**/node_modules
+**/dist
+**/__pycache__
+SYSVIA_ProofSight_All_12_Prompts.md

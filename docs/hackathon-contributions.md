@@ -1,0 +1,5 @@
+﻿# Hackathon contributions
+
+- 2026-10-29 — Initial Meta integration foundation: SDK clients, diagnostics, streaming SAM parser, and unit tests. This first pass was blocked by configuration; subsequent work below resolved it.
+- 2026-10-29 — Built the original React/TypeScript operations console and FastAPI/SQLite backend, with explicit synthetic product/order/inventory seed and no seeded perception results. Added image validation, deterministic evidence reconciliation, controlled read-tool AI investigation, server-authorized approval/execution, idempotency, audit events, and distinct-photo reinspection preserving evidence chains.
+- 2026-10-29 — Corrected local dotenv loading and SAM parser/annotation defects; added security/concurrency/provider regression tests and local Docker builds. Three actual Meta requests succeeded: one ping, one Muse image request, and one SAM stream. Visual input was an original procedural synthetic fixture, not customer media or a warehouse benchmark; the real output remained NEEDS_REVIEW for a shortfall.
