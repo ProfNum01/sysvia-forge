@@ -46,6 +46,8 @@ class Order(Base):
     status: Mapped[str] = mapped_column(String, default="PENDING_INSPECTION")
     preparation_status: Mapped[str] = mapped_column(String, default="READY_FOR_INSPECTION")
     data_source: Mapped[str] = mapped_column(String, default="synthetic_seed")
+    shipping_status: Mapped[str] = mapped_column(String, default="NOT_READY")
+    requires_reinspection: Mapped[bool] = mapped_column(Boolean, default=False)
     latest_inspection_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, default=timestamp)
     items: Mapped[list[OrderItem]] = relationship(order_by="OrderItem.id", lazy="selectin")
@@ -90,6 +92,13 @@ class Inspection(Base):
     resolved_by_inspection_id: Mapped[str | None] = mapped_column(String, nullable=True)
     provider_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     investigation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    investigation_id: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    investigation_status: Mapped[str] = mapped_column(String, default="NOT_STARTED")
+    investigation_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    investigation_error: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    investigation_key: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    investigation_started_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    investigation_completed_at: Mapped[str | None] = mapped_column(String, nullable=True)
     segmentations: Mapped[list] = mapped_column(JSON, default=list)
     provider_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[str] = mapped_column(String, default=timestamp)
@@ -127,7 +136,7 @@ class Discrepancy(Base):
 
 class CorrectiveAction(Base):
     __tablename__ = "corrective_actions"
-    __table_args__ = (CheckConstraint("type IN ('HOLD_ORDER', 'CREATE_PICKING_TASK')"),)
+    __table_args__ = (CheckConstraint("type IN ('HOLD_ORDER', 'HOLD_SHIPMENT', 'CREATE_PICKING_TASK', 'REQUEST_REINSPECTION', 'ESCALATE_TO_HUMAN')"),)
     id: Mapped[str] = mapped_column(String, primary_key=True, default=identifier)
     inspection_id: Mapped[str] = mapped_column(ForeignKey("inspections.id"))
     product_id: Mapped[str | None] = mapped_column(ForeignKey("products.id"), nullable=True)
@@ -135,8 +144,29 @@ class CorrectiveAction(Base):
     type: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="PROPOSED")
     proposal: Mapped[str] = mapped_column(Text)
+    investigation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    evidence_references: Mapped[list] = mapped_column(JSON, default=list)
+    lifecycle_state: Mapped[str] = mapped_column(String, default="PROPOSED")
+    rejection_key: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     execution_key: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
     execution_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, default=timestamp)
+
+
+class PickingTask(Base):
+    __tablename__ = "picking_tasks"
+    __table_args__ = (CheckConstraint("quantity > 0"),)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=identifier)
+    action_id: Mapped[str] = mapped_column(ForeignKey("corrective_actions.id"), unique=True)
+    approval_id: Mapped[str] = mapped_column(ForeignKey("approvals.id"))
+    order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"))
+    order_reference: Mapped[str] = mapped_column(String)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"))
+    product_reference: Mapped[str] = mapped_column(String)
+    quantity: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String, default="OPEN")
     created_at: Mapped[str] = mapped_column(String, default=timestamp)
 
 

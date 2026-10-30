@@ -46,6 +46,10 @@ def create_app(settings: Settings | None = None):
                     row.processing_stage = "INTERRUPTED"
                     row.provider_error = "Analysis was interrupted by an application restart. Retry explicitly."
                     audit(db, "ANALYSIS_INTERRUPTED", row.id)
+                if row.investigation_status == "RUNNING":
+                    row.investigation_status = "FAILED"
+                    row.investigation_error = {"category": "interrupted", "message": "Investigation was interrupted by an application restart. Retry explicitly.", "retryable": True}
+                    audit(db, "INVESTIGATION_INTERRUPTED", row.id, {"investigation_id": row.investigation_id})
             db.commit()
         yield
         engine.dispose()

@@ -99,6 +99,8 @@ class OrderOut(FromORM):
     latest_inspection_id: str | None
     created_at: str
     items: list[ItemOut]
+    shipping_status: str
+    requires_reinspection: bool
 
 
 class ObservationOut(FromORM):
@@ -133,6 +135,11 @@ class ActionOut(FromORM):
     status: str
     proposal: str
     execution_details: dict | None
+    investigation_id: str | None
+    evidence_references: list[str]
+    lifecycle_state: str
+    rejection_reason: str | None
+    error_details: dict | None
 
 
 class InspectionOut(FromORM):
@@ -145,6 +152,12 @@ class InspectionOut(FromORM):
     created_at: str
     provider_error: str | None
     investigation: str | None
+    investigation_id: str | None
+    investigation_status: str
+    investigation_result: dict | None
+    investigation_error: dict | None
+    investigation_started_at: str | None
+    investigation_completed_at: str | None
     observations: list[ObservationOut]
     discrepancies: list[DiscrepancyOut]
     actions: list[ActionOut]
@@ -212,3 +225,11 @@ class DashboardOut(BaseModel):
 class IdempotentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     idempotency_key: str = Field(min_length=8, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
+
+
+class RejectionRequest(IdempotentRequest):
+    reason: str = Field(default="Rejected by supervisor.", min_length=1, max_length=500)
+
+
+class ShippingRequest(IdempotentRequest):
+    target: Literal["READY_TO_SHIP", "SHIPPED"]

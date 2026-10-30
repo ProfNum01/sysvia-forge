@@ -18,6 +18,7 @@ import {
   QueryClient,
   QueryClientProvider,
   useMutation,
+  useIsMutating,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -43,7 +44,6 @@ import {
   LockKeyhole,
   Menu,
   Package,
-  Play,
   RefreshCw,
   ScanLine,
   Search,
@@ -51,7 +51,6 @@ import {
   ShieldCheck,
   Sparkles,
   Upload,
-  Workflow,
   X,
 } from "lucide-react";
 import {
@@ -64,6 +63,11 @@ import {
   YAxis,
 } from "recharts";
 import { Button } from "./components/ui/button";
+import {
+  CorrectiveActionCard,
+  InvestigationCard,
+  OperationsWorkspace,
+} from "./components/operations-workspace";
 import {
   EvidenceViewer,
   InspectionProgress,
@@ -612,12 +616,15 @@ function Overview() {
   );
 }
 function Orders() {
+  const [orderParams] = useSearchParams();
   const q = useQuery({
     queryKey: ["orders"],
     queryFn: () => api<Order[]>("/orders"),
   });
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(
+    orderParams.get("order"),
+  );
   const rows =
     q.data?.filter((o) =>
       `${o.reference} ${o.customer} ${o.status}`
@@ -835,12 +842,17 @@ function InspectionPage() {
     queryKey: ["orders"],
     queryFn: () => api<Order[]>("/orders"),
   });
+  const investigationPending =
+    useIsMutating({ mutationKey: ["investigate", id] }) > 0;
   const inspection = useQuery({
     queryKey: ["inspection", id],
     queryFn: () => api<Inspection>(`/inspections/${id}`),
     enabled: !!id,
     refetchInterval: (query) =>
-      analysisRequested || query.state.data?.status === "ANALYZING"
+      analysisRequested ||
+      investigationPending ||
+      query.state.data?.status === "ANALYZING" ||
+      query.state.data?.investigation_status === "RUNNING"
         ? 1000
         : false,
   });
@@ -860,8 +872,8 @@ function InspectionPage() {
   useEffect(() => {
     setReinspect(false);
     setFormError("");
-    setSelectedRegionIds([]);
-  }, [id]);
+    setSelectedRegionIds(params.get("region") ? [params.get("region")!] : []);
+  }, [id, params]);
   const upload = useMutation({
     mutationFn: async () => {
       const error = validateImage(file, rights);
@@ -1522,7 +1534,7 @@ function InspectionResults({
         >
           <div className="results-content">
             {i.actions.map((a) => (
-              <ActionCard key={a.id} action={a} />
+              <ActionCard key={a.id} action={a} inspection={i} />
             ))}
           </div>
         </Panel>
@@ -1538,248 +1550,57 @@ function Investigation({
   isCurrent: boolean;
 }) {
   const { token } = useContext(TokenContext);
-  const qc = useQueryClient();
-  const mutation = useMutation({
-    mutationFn: () =>
-      api<Inspection>(`/inspections/${i.id}/investigate`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["inspection", i.id] });
-      qc.invalidateQueries({ queryKey: ["inspections"] });
-      qc.invalidateQueries({ queryKey: ["audit"] });
-      qc.invalidateQueries({ queryKey: ["summary"] });
-    },
-  });
   return (
     <Panel
       title="AI investigation"
-      subtitle="Read-only tools investigate discrepancies and propose policy-validated actions."
+      subtitle="Persisted evidence-based findings and actual read-tool activity."
     >
       <div className="results-content">
-        {i.investigation ? (
-          <p className="investigation-summary">{i.investigation}</p>
-        ) : (
-          <p className="form-hint">
-            No investigation summary recorded. The model can read order and
-            evidence records, then propose a resolution. It cannot execute
-            arbitrary operations.
-          </p>
-        )}
-        <div className="button-row investigation-controls">
-          <Button
-            onClick={() => mutation.mutate()}
-            disabled={
-              !token ||
-              !isCurrent ||
-              mutation.isPending ||
-              !i.discrepancies.length ||
-              !["NEEDS_REVIEW", "HELD"].includes(i.status) ||
-              !!i.investigation
-            }
-          >
-            <Sparkles size={16} aria-hidden="true" />
-            {mutation.isPending
-              ? "Investigating with Meta..."
-              : "Investigate discrepancies"}
-          </Button>
-          {!token && (
-            <Link to="/settings" className="text-link">
-              Set operator credential
-            </Link>
-          )}
-        </div>
-        {!i.discrepancies.length && (
-          <p className="form-hint">
-            A recorded discrepancy is required to start an investigation.
-          </p>
-        )}
-        {mutation.isError && (
-          <p role="alert" className="field-error">
-            {mutation.error.message}
-          </p>
-        )}
+        <InvestigationCard inspection={i} token={token} isCurrent={isCurrent} />
       </div>
     </Panel>
   );
 }
-function ActionCard({ action: a }: { action: Action }) {
+function ActionCard({
+  action,
+  inspection,
+}: {
+  action: Action;
+  inspection?: Inspection;
+}) {
   const { token } = useContext(TokenContext);
-  const qc = useQueryClient();
-  const keys = useRef<Record<string, string>>({});
-  const mutation = useMutation({
-    mutationFn: async (operation: "approve" | "execute") => {
-      keys.current[operation] ??= crypto.randomUUID();
-      return api(`/actions/${a.id}/${operation}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ idempotency_key: keys.current[operation] }),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["inspections"] });
-      qc.invalidateQueries({ queryKey: ["inspection"] });
-      qc.invalidateQueries({ queryKey: ["audit"] });
-      qc.invalidateQueries({ queryKey: ["orders"] });
-      qc.invalidateQueries({ queryKey: ["summary"] });
-    },
+  const orders = useQuery({
+    queryKey: ["orders"],
+    queryFn: () => api<Order[]>("/orders"),
   });
-  const status = a.status.toUpperCase();
   return (
-    <div className="action-card">
-      <div className="action-card-header">
-        <span className="action-icon">
-          <Workflow size={19} aria-hidden="true" />
-        </span>
-        <div>
-          <strong>{label(a.type)}</strong>
-          <span>Inspection {a.inspection_id.slice(0, 12)}</span>
-        </div>
-        <Status value={a.status} />
-      </div>
-      <p>
-        {typeof a.proposal === "string"
-          ? a.proposal
-          : JSON.stringify(a.proposal)}
-      </p>
-      {a.quantity != null && (
-        <p className="muted">Proposed quantity: {a.quantity}</p>
+    <CorrectiveActionCard
+      action={action}
+      inspection={inspection}
+      order={orders.data?.find(
+        (order) => order.id === (inspection?.order_id ?? action.order_id),
       )}
-      <div className="button-row">
-        {["PROPOSED", "PENDING", "PENDING_APPROVAL"].includes(status) && (
-          <Button
-            size="sm"
-            disabled={!token || mutation.isPending}
-            onClick={() => mutation.mutate("approve")}
-          >
-            <ShieldCheck size={15} aria-hidden="true" />
-            Approve proposal
-          </Button>
-        )}
-        {status === "APPROVED" && (
-          <Button
-            size="sm"
-            disabled={!token || mutation.isPending}
-            onClick={() => mutation.mutate("execute")}
-          >
-            <Play size={14} aria-hidden="true" />
-            Execute approved action
-          </Button>
-        )}
-        {mutation.isPending && (
-          <LoaderCircle
-            className="spin"
-            size={16}
-            aria-label="Action pending"
-          />
-        )}
-        {!token && !["EXECUTED", "COMPLETED", "REJECTED"].includes(status) && (
-          <Link className="text-link" to="/settings">
-            <LockKeyhole size={13} aria-hidden="true" />
-            Set operator credential
-          </Link>
-        )}
-        {["EXECUTED", "COMPLETED"].includes(status) && (
-          <Button asChild variant="outline" size="sm">
-            <Link to={`/inspection?id=${encodeURIComponent(a.inspection_id)}`}>
-              Upload correction evidence
-              <ArrowRight size={14} aria-hidden="true" />
-            </Link>
-          </Button>
-        )}
-      </div>
-      {mutation.isError && (
-        <p role="alert" className="field-error">
-          {mutation.error.message}
-        </p>
-      )}
-      <span className="action-footnote">
-        Execution creates a local preparation task or hold. A new photo and
-        reinspection are required for verification.
-      </span>
-    </div>
+      token={token}
+    />
   );
 }
 function Operations() {
-  const q = useQuery({
-    queryKey: ["inspections"],
-    queryFn: () => api<Inspection[]>("/inspections"),
-  });
-  const audit = useQuery({
-    queryKey: ["audit"],
-    queryFn: () => api<Audit[]>("/audit-events"),
-  });
-  const actions = q.data?.flatMap((i) => i.actions) ?? [];
+  const { token } = useContext(TokenContext);
   return (
     <>
       <PageHeading
         eyebrow="CONTROLLED AUTONOMY"
         title="AI Operations"
-        description="AI proposes. Server policy validates. A supervisor authorizes consequential actions."
+        description="Investigate real evidence, review validated proposals, and authorize accountable actions."
       />
       <div className="notice">
         <ShieldCheck size={16} aria-hidden="true" />
         <span>
-          No arbitrary operations. Every approved action is validated,
-          idempotent, and audited by the server.
+          Model tools are read-only. Every corrective action requires server
+          validation and recorded supervisor approval.
         </span>
       </div>
-      <div className="operations-grid">
-        <Panel
-          title="Action proposals"
-          subtitle="Only actual investigation proposals appear here."
-          action={
-            <span className="count-badge">
-              {q.isSuccess ? actions.length : "—"}
-            </span>
-          }
-        >
-          {q.isPending ? (
-            <Loading />
-          ) : q.isError ? (
-            <ErrorState error={q.error} retry={() => q.refetch()} />
-          ) : actions.length ? (
-            <div className="results-content">
-              {actions.map((a) => (
-                <ActionCard key={a.id} action={a} />
-              ))}
-            </div>
-          ) : (
-            <Empty icon={Workflow} title="No proposals to review">
-              Inspect an order and run an investigation to produce
-              evidence-linked recommendations.
-              <Button asChild variant="outline" size="sm">
-                <Link to="/inspection">
-                  Open inspection
-                  <ArrowRight size={14} aria-hidden="true" />
-                </Link>
-              </Button>
-            </Empty>
-          )}
-        </Panel>
-        <Panel
-          title="Audit trail"
-          subtitle="Real events from the local audit store."
-          action={<GitBranch size={18} className="muted" aria-hidden="true" />}
-        >
-          {audit.isPending ? (
-            <Loading />
-          ) : audit.isError ? (
-            <ErrorState error={audit.error} retry={() => audit.refetch()} />
-          ) : audit.data.length ? (
-            <AuditList events={audit.data} />
-          ) : (
-            <Empty icon={Activity} title="No audit events recorded">
-              Real investigation and action events will appear here. Agent
-              thoughts are never simulated.
-            </Empty>
-          )}
-        </Panel>
-      </div>
+      <OperationsWorkspace token={token} />
     </>
   );
 }

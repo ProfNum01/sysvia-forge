@@ -207,16 +207,21 @@ class BackendSafetyTests(unittest.TestCase):
             inventory = db.scalar(select(Inventory).where(Inventory.product_id == "product-red"))
             inventory.quantity_available = 1
             db.commit()
-        # The recommendation is advisory; only the database shortfall determines the proposed task.
+        # The structured recommendation remains subject to the database shortfall and stock policy.
+        refs = [f"inspection:{inspection['id']}", f"photo:{inspection['photo_id']}", "inventory:product-red"]
+        refs += [f"discrepancy:{row['id']}" for row in inspection["discrepancies"]]
+        refs += [f"region:{row['id']}" for row in inspection["regions"]]
         summary = InvestigationSummary(summary="One visible red unit; review the stock location.",
-                                       recommendation="REQUEST_REVIEW")
+            recommendation="REQUEST_REVIEW", decision="CORRECTIVE_ACTION_REQUIRED", evidence_references=refs,
+            recommended_actions=[{"type": "CREATE_PICKING_TASK", "product_id": "product-red", "quantity": 1,
+                "requires_approval": True, "evidence_references": refs}])
         with patch("backend.app.api.routes.investigate_with_read_tools", return_value=summary):
             investigated = self.client.post(f"/api/inspections/{inspection['id']}/investigate", headers=self.auth)
         self.assertEqual(investigated.status_code, 200)
         tasks = [action for action in investigated.json()["actions"] if action["type"] == "CREATE_PICKING_TASK"]
         self.assertEqual(len(tasks), 1)
         task = tasks[0]
-        self.assertEqual((task["product_id"], task["quantity"], task["status"]), ("product-red", 1, "PROPOSED"))
+        self.assertEqual((task["product_id"], task["quantity"], task["status"]), ("product-red", 1, "PENDING_APPROVAL"))
         execute_url = f"/api/actions/{task['id']}/execute"
         execution_key = {"idempotency_key": "picking-execution-12345678"}
         self.assertEqual(self.client.post(execute_url, json=execution_key, headers=self.auth).status_code, 409)
@@ -271,8 +276,12 @@ class BackendSafetyTests(unittest.TestCase):
                 message["tool_calls"] = [{"id": f"call-{name}", "type": "function",
                                            "function": {"name": name, "arguments": arguments}}]
             else:
+                reference = "inspection:" + inspection["id"]
                 message["content"] = json.dumps({"summary": "One visible red unit needs review.",
-                                                  "recommendation": "REQUEST_REVIEW"})
+                    "recommendation": "REQUEST_REVIEW", "decision": "HUMAN_REVIEW_REQUIRED", "findings": [],
+                    "recommended_actions": [{"type": "ESCALATE_TO_HUMAN", "product_id": None, "quantity": None,
+                        "requires_approval": True, "evidence_references": [reference]}],
+                    "evidence_references": [reference], "verification_required": True})
             return httpx.Response(200, json={"id": "synthetic-completion", "object": "chat.completion",
                 "created": 0, "model": "muse-spark-1.3", "choices": [{"index": 0, "message": message,
                 "finish_reason": "tool_calls" if name else "stop"}]})
@@ -283,10 +292,12 @@ class BackendSafetyTests(unittest.TestCase):
             payload = json.loads(request.content)
             requests.append(payload)
             if len(requests) == 1:
-                return completion(name="get_order")
+                return completion(name="get_order_details", arguments='{"order_id":"order-1001"}')
             if len(requests) == 2:
-                return completion(name="get_inventory")
+                return completion(name="get_inspection_results", arguments=json.dumps({"inspection_id": inspection["id"]}))
             if len(requests) == 3:
+                return completion(name="check_inventory", arguments='{"product_id":"product-red"}')
+            if len(requests) in (4, 5):
                 return completion()
             raise AssertionError("Investigation exceeded its bounded read tool flow")
 
@@ -300,24 +311,23 @@ class BackendSafetyTests(unittest.TestCase):
                 summary = investigate_with_read_tools(db, row, order)
             self.assertEqual(summary.recommendation, "REQUEST_REVIEW")
             read_audits = list(db.scalars(select(AuditEvent.event_type).where(AuditEvent.entity_id == row.id)))
-            self.assertIn("AGENT_READ_GET_ORDER", read_audits)
-            self.assertIn("AGENT_READ_GET_INVENTORY", read_audits)
+            self.assertIn("TOOL_CALLED", read_audits)
+            self.assertIn("TOOL_COMPLETED", read_audits)
             self.assertEqual(db.scalar(select(func.count()).select_from(CorrectiveAction)), 1)
             self.assertEqual(db.scalar(select(func.count()).select_from(Approval)), 0)
             self.assertEqual(order.status, "NEEDS_REVIEW")
-        self.assertEqual(len(requests), 3)
-        self.assertEqual([tool["function"]["name"] for tool in requests[0]["tools"]], ["get_order", "get_inventory"])
-        self.assertEqual([tool["function"]["name"] for tool in requests[1]["tools"]], ["get_inventory"])
+        self.assertEqual(len(requests), 5)
+        self.assertEqual({tool["function"]["name"] for tool in requests[0]["tools"]},
+            {"get_order_details", "get_inspection_results", "check_inventory", "get_pending_actions", "get_order_history"})
+        self.assertEqual(requests[0]["tool_choice"], "auto")
         tool_results = {message["tool_call_id"]: json.loads(message["content"])
-                        for message in requests[2]["messages"] if message["role"] == "tool"}
-        self.assertEqual(tool_results["call-get_order"]["id"], "order-1001")
-        self.assertEqual(tool_results["call-get_order"]["items"][0]["quantity"], 2)
-        inventory = {item["product_id"]: item for item in tool_results["call-get_inventory"]}
-        self.assertEqual(set(inventory), {"product-red", "product-blue"})
-        self.assertEqual(inventory["product-red"]["quantity_available"], 20)
-        self.assertEqual(inventory["product-blue"]["location"], "Demo rack B-01")
+                        for message in requests[-1]["messages"] if message["role"] == "tool"}
+        self.assertEqual(tool_results["call-get_order_details"]["id"], "order-1001")
+        self.assertEqual(tool_results["call-get_order_details"]["items"][0]["quantity"], 2)
+        self.assertEqual(tool_results["call-check_inventory"]["quantity_available"], 20)
+        self.assertEqual(tool_results["call-check_inventory"]["location"], "Demo rack A-01")
 
-        for name, arguments in (("delete_order", "{}"), ("get_inventory", '{"product_id":"another-product"}')):
+        for name, arguments in (("delete_order", "{}"), ("check_inventory", '{"product_id":"another-product"}')):
             with self.subTest(name=name, arguments=arguments):
                 rejected_client = OpenAI(api_key=config.api_key, base_url=config.base_url, max_retries=0,
                     http_client=httpx.Client(transport=httpx.MockTransport(

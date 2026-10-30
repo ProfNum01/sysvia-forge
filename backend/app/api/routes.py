@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 import re
 import time
 from collections import Counter
@@ -15,9 +16,10 @@ from sqlalchemy.orm import object_session
 from pydantic import ValidationError
 
 from backend.app.models.database import (Approval, AuditEvent, CorrectiveAction, Discrepancy, Inspection,
-    InspectionObservation, Inventory, Order, Product, audit)
+    InspectionObservation, Inventory, Order, PickingTask, Product, audit, identifier, timestamp)
 from backend.app.schemas.responses import (ActionOut, AuditOut, DashboardOut, HealthOut, IdempotentRequest,
-    EvidenceRegion, InspectionOut, MetaStatusOut, ObservationInput, OrderOut, ProductOut)
+    EvidenceRegion, InspectionOut, MetaStatusOut, ObservationInput, OrderOut, ProductOut, RejectionRequest, ShippingRequest)
+from backend.app.services.action_policy import supported_shortfall, unresolved_escalation, validate_recommendations
 from backend.app.services.catalog import reference_path
 from backend.app.services.investigation import investigate_with_read_tools
 from backend.app.services.inventory import available_quantity
@@ -59,7 +61,8 @@ def inspection_out(inspection):
     db = object_session(inspection)
     if db is not None:
         output.execution_events = list(db.scalars(select(AuditEvent).where(
-            AuditEvent.entity_id == inspection.id).order_by(AuditEvent.created_at, AuditEvent.id)))
+            AuditEvent.entity_id.in_([inspection.id, *[action.id for action in inspection.actions]])
+            ).order_by(AuditEvent.created_at, AuditEvent.id)))
     output.unidentified_objects = [o for o in output.observations if o.identification_status == "UNIDENTIFIED"]
     return output
 
@@ -152,6 +155,8 @@ def create_inspection(request, db, order_id, image, rights_confirmed, parent=Non
         latest = required(db, Inspection, order.latest_inspection_id)
         if latest.status == "ANALYZING":
             raise HTTPException(409, "The current inspection is being analyzed.")
+        if latest.investigation_status == "RUNNING":
+            raise HTTPException(409, "The current inspection is being investigated. Wait for the bounded investigation to finish.")
         if parent is None:
             raise HTTPException(409, "Use reinspection to attach new evidence to the existing inspection chain.")
         if latest.id != parent.id:
@@ -357,12 +362,18 @@ def finish_analysis(db, inspection, result, sam, products, observations, regions
         inspection.status = "VERIFIED"
         order.status = "VERIFIED"
         order.preparation_status = "VERIFIED_BY_NEW_EVIDENCE"
+        order.requires_reinspection = False
+        order.shipping_status = "NOT_READY"
         prior = db.get(Inspection, inspection.previous_inspection_id) if inspection.previous_inspection_id else None
         while prior:
             prior.resolved_by_inspection_id = inspection.id
             for discrepancy in prior.discrepancies:
                 discrepancy.status = "RESOLVED"
             prior = db.get(Inspection, prior.previous_inspection_id) if prior.previous_inspection_id else None
+        db.flush()
+        if unresolved_escalation(db, order.id):
+            order.status = "HELD"
+            order.shipping_status = "HELD"
         audit(db, "EVIDENCE_RECONCILED", inspection.id, {"photo_id": inspection.photo_id,
               "previous_inspection_id": inspection.previous_inspection_id})
     else:
@@ -384,35 +395,110 @@ def finish_analysis(db, inspection, result, sam, products, observations, regions
 
 
 @router.post("/inspections/{inspection_id}/investigate", response_model=InspectionOut)
-def investigate(request: Request, inspection_id: str, actor=Depends(supervisor), db=Depends(database)):
+def investigate(request: Request, inspection_id: str,
+                idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+                actor=Depends(supervisor), db=Depends(database)):
     with request.app.state.mutations:
         inspection = required(db, Inspection, inspection_id)
         order = require_current(db, inspection)
         if inspection.status not in {"NEEDS_REVIEW", "HELD"}:
             raise HTTPException(409, "Investigation requires analyzed, unresolved evidence.")
-        if inspection.investigation:
+        if idempotency_key is not None:
+            if not re.fullmatch(r"[a-zA-Z0-9_-]{8,100}", idempotency_key):
+                raise HTTPException(422, "Invalid investigation idempotency key.")
+            owner = db.scalar(select(Inspection).where(Inspection.investigation_key == idempotency_key))
+            if owner is not None and owner.id != inspection.id:
+                raise HTTPException(409, "This investigation idempotency key belongs to another inspection.")
+        if inspection.investigation_status in {"RUNNING", "COMPLETED"}:
             return inspection_out(inspection)
-        try:
-            summary = investigate_with_read_tools(db, inspection, order)
-        except MetaConfigurationError:
-            raise HTTPException(503, "MODEL_API_KEY is missing. Configure the root .env file.") from None
-        except Exception as exc:
-            audit(db, "INVESTIGATION_FAILED", inspection.id, {"category": classify_api_error(exc)["category"]})
+        inspection.investigation_id = inspection.investigation_id or identifier()
+        inspection.investigation_key = idempotency_key or inspection.investigation_key
+        inspection.investigation_status = "RUNNING"
+        inspection.investigation_error = None
+        inspection.investigation_started_at = timestamp()
+        inspection.investigation_completed_at = None
+        attempt = inspection.investigation_started_at
+        audit(db, "INVESTIGATION_STARTED", inspection.id, {"investigation_id": inspection.investigation_id}, actor)
+        db.commit()
+
+    def event(stage, details):
+        if stage not in {"TOOL_CALLED", "TOOL_COMPLETED", "EVIDENCE_RETRIEVED", "AGENT_MODEL_STARTED", "AGENT_MODEL_COMPLETED"}:
+            raise ValueError("unsupported_investigation_event")
+        allowed = {"tool", "arguments", "result", "evidence_references", "order_id", "inspection_id", "product_id",
+                   "model", "http_status", "latency_ms", "usage", "ok", "request_index", "category", "status"}
+        safe = {key: value for key, value in details.items() if key in allowed}
+        if len(json.dumps(safe, ensure_ascii=True)) > 20000:
+            raise ValueError("oversized_investigation_event")
+        with request.app.state.mutations, request.app.state.sessions() as progress:
+            current = progress.get(Inspection, inspection_id)
+            current_order = progress.get(Order, current.order_id)
+            if (current.investigation_status == "RUNNING" and current.investigation_started_at == attempt
+                    and current_order.latest_inspection_id == current.id):
+                audit(progress, stage, current.id, {**safe, "investigation_id": current.investigation_id}, "meta-read-tool")
+                progress.commit()
+
+    def failed(category, message, status, retryable=False, validation=False):
+        with request.app.state.mutations:
+            db.expire_all()
+            current = required(db, Inspection, inspection_id)
+            require_current(db, current)
+            if current.investigation_status != "RUNNING" or current.investigation_started_at != attempt:
+                raise HTTPException(409, "Investigation was interrupted or superseded.")
+            current.investigation_status = "FAILED"
+            current.investigation_error = {"category": category, "message": message, "retryable": retryable}
+            current.investigation_completed_at = timestamp()
+            audit(db, "VALIDATION_FAILED" if validation else "INVESTIGATION_FAILED", current.id,
+                  {"category": category, "investigation_id": current.investigation_id})
             db.commit()
-            raise HTTPException(502, "Meta inventory investigation failed. No corrective action was executed.") from None
-        inspection.investigation = summary.summary
-        # Policy uses database quantities, never the model's recommendation as an executable instruction.
-        for discrepancy in inspection.discrepancies:
-            if discrepancy.type != "SHORTFALL" or discrepancy.observed_quantity is None:
+        raise HTTPException(status, message)
+
+    try:
+        summary = investigate_with_read_tools(db, inspection, order, on_event=event)
+    except MetaConfigurationError:
+        return failed("configuration", "MODEL_API_KEY is missing. Configure the root .env file.", 503)
+    except ValueError:
+        return failed("invalid_recommendation", "The agent returned an unsupported recommendation or tool request. No action was created.", 422, validation=True)
+    except Exception as exc:
+        error = getattr(exc, "safe_error", None) or classify_api_error(exc)
+        category = error["category"]
+        return failed(category, "Meta investigation failed. No corrective action was executed.",
+                      504 if category == "timeout" else 429 if category == "rate_limit" else 503 if category == "connection" else 502,
+                      retryable=category in {"timeout", "rate_limit", "connection", "service_error"})
+    with request.app.state.mutations:
+        db.expire_all()
+        inspection = required(db, Inspection, inspection_id)
+        order = require_current(db, inspection)
+        if inspection.investigation_status != "RUNNING" or inspection.investigation_started_at != attempt:
+            raise HTTPException(409, "Investigation was interrupted or superseded. No actions were applied.")
+        try:
+            result = summary.model_dump()
+            proposals = validate_recommendations(db, inspection, order, result)
+        except (ValueError, TypeError, AttributeError, KeyError):
+            return failed("invalid_recommendation", "The proposed actions are not supported by current database evidence. No action was created.", 422, validation=True)
+        inspection.investigation = result["summary"]
+        inspection.investigation_result = result
+        inspection.investigation_status = "COMPLETED"
+        inspection.investigation_completed_at = timestamp()
+        for proposal in proposals:
+            equivalent_types = {"HOLD_ORDER", "HOLD_SHIPMENT"} if proposal["type"] == "HOLD_SHIPMENT" else {proposal["type"]}
+            duplicate = next((action for action in inspection.actions if action.type in equivalent_types
+                and action.product_id == proposal.get("product_id") and action.quantity == proposal.get("quantity")
+                and action.status != "REJECTED"), None)
+            if duplicate:
+                duplicate.investigation_id = inspection.investigation_id
+                duplicate.evidence_references = proposal["evidence_references"]
                 continue
-            amount = discrepancy.required_quantity - discrepancy.observed_quantity
-            inventory = db.scalar(select(Inventory).where(Inventory.product_id == discrepancy.product_id))
-            if amount > 0 and inventory and available_quantity(db, discrepancy.product_id) >= amount:
-                db.add(CorrectiveAction(inspection_id=inspection.id, product_id=discrepancy.product_id,
-                    quantity=amount, type="CREATE_PICKING_TASK",
-                    proposal=f"Create a picking task for {amount} unit(s) from {inventory.location}. New visual evidence remains required."))
-        audit(db, "INVESTIGATION_COMPLETED", inspection.id, {"recommendation": summary.recommendation,
-              "write_operations": 0, "tools": ["get_order", "get_inventory"]}, actor="meta-read-tool")
+            action = CorrectiveAction(inspection_id=inspection.id, investigation_id=inspection.investigation_id,
+                type=proposal["type"], product_id=proposal.get("product_id"), quantity=proposal.get("quantity"),
+                proposal=result["summary"], evidence_references=proposal["evidence_references"],
+                status="PENDING_APPROVAL", lifecycle_state="PENDING_APPROVAL")
+            db.add(action)
+            db.flush()
+            audit(db, "ACTION_PROPOSED", inspection.id, {"action_id": action.id, "type": action.type,
+                "investigation_id": inspection.investigation_id})
+            audit(db, "APPROVAL_REQUIRED", inspection.id, {"action_id": action.id, "type": action.type})
+        audit(db, "INVESTIGATION_COMPLETED", inspection.id, {"investigation_id": inspection.investigation_id,
+              "decision": result["decision"], "write_operations": 0}, actor="meta-read-tool")
         db.commit()
         db.refresh(inspection)
         return inspection_out(inspection)
@@ -424,14 +510,9 @@ def validate_action(db, action):
     if inspection.status not in {"NEEDS_REVIEW", "HELD"}:
         raise HTTPException(409, "This evidence no longer supports a corrective action.")
     if action.type == "CREATE_PICKING_TASK":
-        discrepancy = next((d for d in inspection.discrepancies if d.type == "SHORTFALL"
-                            and d.product_id == action.product_id and d.status == "OPEN"), None)
-        inventory = db.scalar(select(Inventory).where(Inventory.product_id == action.product_id))
-        if (not inspection.investigation or not discrepancy or discrepancy.observed_quantity is None
-                or not inventory or not action.quantity or available_quantity(db, action.product_id) < action.quantity
-                or action.quantity != discrepancy.required_quantity - discrepancy.observed_quantity):
+        if not inspection.investigation or not supported_shortfall(db, inspection, action.product_id, action.quantity):
             raise HTTPException(409, "Current evidence and inventory do not authorize this picking task.")
-    elif action.type != "HOLD_ORDER":
+    elif action.type not in {"HOLD_ORDER", "HOLD_SHIPMENT", "REQUEST_REINSPECTION", "ESCALATE_TO_HUMAN"}:
         raise HTTPException(422, "Action type is not permitted by deterministic policy.")
     return inspection, order
 
@@ -440,15 +521,16 @@ def validate_action(db, action):
 def approve(request: Request, action_id: str, body: IdempotentRequest, actor=Depends(supervisor), db=Depends(database)):
     with request.app.state.mutations:
         action = required(db, CorrectiveAction, action_id)
-        validate_action(db, action)
         existing = db.scalar(select(Approval).where(Approval.action_id == action.id))
         if existing:
             if existing.idempotency_key != body.idempotency_key:
                 raise HTTPException(409, "Action already has an approval under a different idempotency key.")
             return action
-        if action.status != "PROPOSED":
+        validate_action(db, action)
+        if action.status not in {"PROPOSED", "PENDING_APPROVAL"}:
             raise HTTPException(409, "Only a proposed action can be approved.")
         action.status = "APPROVED"
+        action.lifecycle_state = "APPROVED"
         db.add(Approval(action_id=action.id, operator=actor, idempotency_key=body.idempotency_key))
         audit(db, "ACTION_APPROVED", action.id, {"type": action.type, "inspection_id": action.inspection_id}, actor)
         try:
@@ -467,27 +549,122 @@ def execute(request: Request, action_id: str, body: IdempotentRequest, actor=Dep
             if action.execution_key != body.idempotency_key:
                 raise HTTPException(409, "Action already executed under a different idempotency key.")
             return action
-        inspection, order = validate_action(db, action)
         approval = db.scalar(select(Approval).where(Approval.action_id == action.id))
         if action.status != "APPROVED" or not approval:
             raise HTTPException(409, "Recorded supervisor approval is required before execution.")
-        if action.type == "HOLD_ORDER":
-            order.status = "HELD"
-            inspection.status = "HELD"
-            action.execution_details = {"order_held": True, "reinspection_required": True}
-        else:
-            order.preparation_status = "PICKING_TASK_OPEN"
-            action.execution_details = {"task_id": f"pick-{action.id}", "status": "OPEN",
-                                        "reinspection_required": True, "inventory_mutated": False}
-        action.status = "EXECUTED"
-        action.execution_key = body.idempotency_key
-        audit(db, "CONTROLLED_ACTION_EXECUTED", action.id, {"type": action.type, **action.execution_details}, actor)
         try:
+            changed = db.execute(update(CorrectiveAction).where(CorrectiveAction.id == action.id,
+                CorrectiveAction.status == "APPROVED").values(status="EXECUTING", lifecycle_state="EXECUTING"))
+            if not changed.rowcount:
+                raise HTTPException(409, "Another request has claimed this action.")
+            # Revalidate after the write claim, within the same transaction as stock reservation.
+            db.expire_all()
+            action = required(db, CorrectiveAction, action_id)
+            inspection, order = validate_action(db, action)
+            order.requires_reinspection = True
+            order.shipping_status = "HELD"
+            if action.type in {"HOLD_ORDER", "HOLD_SHIPMENT"}:
+                order.status = "HELD"
+                inspection.status = "HELD"
+                action.execution_details = {"order_id": order.id, "order_held": True, "reinspection_required": True}
+            elif action.type == "CREATE_PICKING_TASK":
+                product = required(db, Product, action.product_id)
+                task = PickingTask(id=f"pick-{action.id}", action_id=action.id, approval_id=approval.id,
+                    order_id=order.id, order_reference=order.reference, product_id=product.id,
+                    product_reference=product.sku, quantity=action.quantity, status="OPEN")
+                db.add(task)
+                db.flush()
+                order.preparation_status = "PICKING_TASK_OPEN"
+                action.execution_details = {"task_id": task.id, "status": task.status,
+                    "order_id": task.order_id, "order_reference": task.order_reference, "product_id": task.product_id,
+                    "product_reference": task.product_reference, "quantity": task.quantity, "created_at": task.created_at,
+                    "approval_id": task.approval_id, "reinspection_required": True, "inventory_mutated": False}
+            elif action.type == "REQUEST_REINSPECTION":
+                order.preparation_status = "NEW_EVIDENCE_REQUIRED"
+                action.execution_details = {"order_id": order.id, "previous_photo_id": inspection.photo_id,
+                    "reinspection_required": True, "status": "AWAITING_NEW_PHOTO"}
+            else:
+                order.status = "HELD"
+                action.execution_details = {"order_id": order.id, "human_review_required": True,
+                    "status": "PENDING_HUMAN_REVIEW", "reinspection_required": True}
+            action.status = "EXECUTED"
+            action.lifecycle_state = "AWAITING_REINSPECTION"
+            action.execution_key = body.idempotency_key
+            action.error_details = None
+            audit(db, "CONTROLLED_ACTION_EXECUTED", action.id, {"type": action.type, **action.execution_details}, actor)
+            audit(db, "EXECUTION_COMPLETED", inspection.id, {"action_id": action.id, "type": action.type}, actor)
+            audit(db, "REINSPECTION_REQUIRED", inspection.id, {"action_id": action.id, "previous_photo_id": inspection.photo_id})
             db.commit()
         except IntegrityError:
             db.rollback()
             raise HTTPException(409, "This execution idempotency key is already in use.") from None
+        except HTTPException:
+            db.rollback()
+            action = required(db, CorrectiveAction, action_id)
+            if action.status == "APPROVED":
+                action.status = "FAILED"
+                action.lifecycle_state = "FAILED"
+                action.error_details = {"category": "policy_validation", "message": "Current evidence or stock no longer supports execution."}
+                audit(db, "EXECUTION_FAILED", action.inspection_id, {"action_id": action.id, "category": "policy_validation"})
+                db.commit()
+            raise
+        except Exception:
+            db.rollback()
+            action = required(db, CorrectiveAction, action_id)
+            action.status = "FAILED"
+            action.lifecycle_state = "FAILED"
+            action.error_details = {"category": "transaction_failed", "message": "Execution failed. No partial operational change was retained."}
+            audit(db, "EXECUTION_FAILED", action.inspection_id, {"action_id": action.id, "category": "transaction_failed"})
+            db.commit()
+            raise HTTPException(500, action.error_details["message"]) from None
         return action
+
+
+@router.post("/actions/{action_id}/reject", response_model=ActionOut)
+def reject(request: Request, action_id: str, body: RejectionRequest, actor=Depends(supervisor), db=Depends(database)):
+    with request.app.state.mutations:
+        action = required(db, CorrectiveAction, action_id)
+        if action.status == "REJECTED":
+            if action.rejection_key != body.idempotency_key or action.rejection_reason != body.reason:
+                raise HTTPException(409, "This rejection belongs to a different request.")
+            return action
+        if action.status not in {"PROPOSED", "PENDING_APPROVAL"}:
+            raise HTTPException(409, "Only an action awaiting approval can be rejected.")
+        action.status = "REJECTED"
+        action.lifecycle_state = "REJECTED"
+        action.rejection_key = body.idempotency_key
+        action.rejection_reason = body.reason
+        audit(db, "ACTION_REJECTED", action.inspection_id, {"action_id": action.id, "type": action.type}, actor)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "This rejection idempotency key is already in use.") from None
+        return action
+
+
+@router.post("/orders/{order_id}/shipping-transition", response_model=OrderOut)
+def shipping_transition(request: Request, order_id: str, body: ShippingRequest, actor=Depends(supervisor), db=Depends(database)):
+    with request.app.state.mutations:
+        order = required(db, Order, order_id)
+        prior = db.scalar(select(AuditEvent).where(AuditEvent.event_type == "SHIPPING_TRANSITION",
+            AuditEvent.entity_id == order.id, AuditEvent.details["idempotency_key"].as_string() == body.idempotency_key))
+        if prior:
+            if prior.details.get("target") != body.target:
+                raise HTTPException(409, "This shipping request already used a different target.")
+            return order
+        inspection = required(db, Inspection, order.latest_inspection_id) if order.latest_inspection_id else None
+        if (not inspection or inspection.status != "VERIFIED" or order.status != "VERIFIED"
+                or order.requires_reinspection or order.shipping_status == "HELD" or unresolved_escalation(db, order.id)):
+            raise HTTPException(409, "Shipping requires a verified current photo and resolved operational holds.")
+        if body.target == "SHIPPED" and order.shipping_status != "READY_TO_SHIP":
+            raise HTTPException(409, "The verified order must be shipping-ready before it can be shipped.")
+        if order.shipping_status == "SHIPPED":
+            raise HTTPException(409, "A shipped order cannot transition backwards.")
+        order.shipping_status = body.target
+        audit(db, "SHIPPING_TRANSITION", order.id, {"target": body.target, "idempotency_key": body.idempotency_key}, actor)
+        db.commit()
+        return order
 
 
 @router.get("/audit-events", response_model=list[AuditOut])

@@ -63,3 +63,24 @@ Contracts verified: [Chat Completions](https://dev.meta.ai/docs/cookbook/quickst
 [SAM](https://dev.meta.ai/docs/media-segmentation),
 [parser](https://dev.meta.ai/docs/sam/client-libraries),
 [read tools](https://dev.meta.ai/docs/tool-calling).
+
+
+## Task 002 verification (2026-10-30)
+
+Four additional real requests on original synthetic media: Muse ping HTTP 200,
+2,344 ms, 140 tokens; Muse visual HTTP 200, 6,693 ms, 5,070 tokens;
+SAM red HTTP 200, 1,626 ms, no matching region; SAM blue HTTP 200, 2,013 ms,
+one actual box and mask. Total inspection latency: 12,275 ms.
+The new inspection `e5852427-7de3-49fe-aa6e-8d00c05cd4d7` remained
+NEEDS_REVIEW: blue observed 1, red quantity unknown. No red geometry or count
+was invented. Both old and new photos remain. Seven cumulative Meta requests
+through Task 002. Physical warehouse-image validation remains BLOCKED.
+
+Added reference catalog, strict region grounding, actual mask overlays,
+comparison table, real progress polling, upload idempotency, camera input,
+and additive migrations. Camera hardware capture was not exercised.
+Commands: `python scripts/create_inspection_fixtures.py`,
+`python -m unittest discover -s tests -v` (86 passed), `npm.cmd test`
+(17 passed), `npm.cmd run build`, `npm.cmd audit` (0 vulnerabilities),
+`python -m pip check`, `python -m compileall -q backend proofsight scripts tests`,
+`git diff --check`, `docker compose up --build -d`.

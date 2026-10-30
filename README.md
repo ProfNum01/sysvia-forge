@@ -43,10 +43,16 @@ Docker uses the same URLs and persists SQLite and evidence in the ignored data/ 
 - The explicit seed creates four synthetic products, five orders, and inventory.
   It does not create inspection results or reset existing orders.
 - Select a ready order, upload rights-cleared evidence, and explicitly analyze.
-  A run makes one Muse image request and one SAM request. Investigation is a
-  separate paid operation using only bound order/inventory read tools.
-- Approve then execute an allowed hold or picking task. A task cannot verify an
-  order: upload a genuinely different image and reanalyze. Both photo IDs remain.
+  A run makes one Muse image request and up to four SAM requests for distinct
+  observed catalog products. Investigation is a separate paid operation using
+  bounded, order-scoped read tools.
+- In **AI Operations**, start an investigation, inspect its recorded tools and
+  evidence, then approve or reject each validated proposal. Execution is a
+  separate authorized step. Supported actions hold shipment, create a picking
+  task, request reinspection, or escalate to human review.
+- A picking task reserves availability without deducting physical inventory.
+  It cannot verify an order: upload a genuinely different image and reanalyze.
+  Both photo IDs remain. Shipping transitions require current verified evidence.
 - Optional original synthetic image: python scripts/create_synthetic_image.py.
   This produces data/synthetic-preparation.png, not a warehouse photograph.
 

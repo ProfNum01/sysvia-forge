@@ -15,6 +15,8 @@ export type Order = {
   preparation_status: string;
   data_source: string;
   latest_inspection_id: string | null;
+  shipping_status?: string;
+  requires_reinspection?: boolean;
   created_at: string;
   items: {
     id: string;
@@ -52,6 +54,32 @@ export type Action = {
   product_id?: string;
   quantity?: number;
   inspection_id: string;
+  order_id?: string;
+  order_reference?: string;
+  investigation_id?: string | null;
+  evidence_references?: string[];
+  error_details?: { category?: string; message?: string } | null;
+  lifecycle_state?: string;
+  execution_details?: Record<string, unknown> | null;
+  rejection_reason?: string | null;
+};
+export type InvestigationResult = {
+  investigation_id?: string;
+  inspection_id?: string;
+  decision?: string;
+  summary?: string;
+  findings?: {
+    type?: string;
+    product_id?: string | null;
+    quantity?: number | null;
+    description?: string;
+    evidence?: string;
+    evidence_references?: string[];
+    [key: string]: unknown;
+  }[];
+  evidence_references?: string[];
+  recommended_actions?: Record<string, unknown>[];
+  verification_required?: boolean;
 };
 export type Inspection = {
   id: string;
@@ -67,6 +95,16 @@ export type Inspection = {
   actions: Action[];
   image_url?: string;
   investigation?: string | null;
+  investigation_id?: string | null;
+  investigation_status?: "NOT_STARTED" | "RUNNING" | "COMPLETED" | "FAILED";
+  investigation_result?: InvestigationResult | null;
+  investigation_error?: {
+    category: string;
+    message: string;
+    retryable: boolean;
+  } | null;
+  investigation_started_at?: string | null;
+  investigation_completed_at?: string | null;
   annotation_url?: string | null;
   segmentations?: unknown[];
   image_width?: number;
