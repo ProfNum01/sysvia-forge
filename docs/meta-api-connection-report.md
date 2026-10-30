@@ -84,3 +84,50 @@ Commands: `python scripts/create_inspection_fixtures.py`,
 (17 passed), `npm.cmd run build`, `npm.cmd audit` (0 vulnerabilities),
 `python -m pip check`, `python -m compileall -q backend proofsight scripts tests`,
 `git diff --check`, `docker compose up --build -d`.
+
+
+## Task 003 verification (2026-10-30)
+
+Implemented five dynamically selected, order-scoped read tools, strict decisions,
+bounded requests/time/output, persisted progress, four approved action types,
+transactional picking records, rejection, shipping guards and new-photo resolution.
+Existing records and approvals survived migration; SQLite integrity and FK checks passed.
+
+| Live investigation | Model requests | API result | Elapsed | Tokens |
+| --- | --- | --- | --- | --- |
+| First attempt | 4 HTTP 200 | Decision rejected, endpoint 422; no new actions | 29,516 ms | 20394 |
+| Controlled retry | 4 HTTP 200 | COMPLETED, endpoint 200 | 25,759 ms | 20911 |
+
+Eight actual Muse calls this task; no image/SAM calls. First rejection reason was
+not retained at the original validation boundary. Added safe validation diagnostics
+and explicit unknown-quantity rules before the retry. The successful agent selected
+order, inspection, pending-action and history tools. It returned HUMAN_REVIEW_REQUIRED
+for the actual current inspection, with null unknown quantities, REQUEST_REINSPECTION
+and ESCALATE_TO_HUMAN. No stock lookup was needed for this uncertain case; that tool
+is verified against real isolated SQLite data with mocked model transport.
+
+Authenticated local API verification: unauthorized approval 403, execution without
+approval 409, approval/execution and their replays 200, exactly one execution event.
+REQUEST_REINSPECTION executed; the existing order remains HELD, its photo is preserved,
+and human escalation awaits approval. No live picking task or physical correction
+was claimed. Rejection, picking concurrency and successful new-photo release are
+covered by explicitly mocked isolated tests.
+
+Commands: `python -m unittest discover -s tests -q` (115 passed), `npm.cmd test`
+(22 passed), `npm.cmd run build`, `npm.cmd audit` (0 vulnerabilities),
+`python -m compileall -q backend proofsight scripts tests`, `python -m pip check`,
+`git diff --check`, `python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --workers 1`,
+`npm.cmd run dev -- --host 127.0.0.1`, and authenticated HTTPX API verification.
+No dependencies installed. Both native endpoints respond HTTP 200. Docker daemon
+was unavailable; browser automation disconnected, so interactive UI verification
+remains BLOCKED. Full live discrepancy-to-picking-to-corrected-photo verification
+also remains BLOCKED pending clear, rights-cleared product evidence.
+
+Changed: backend models/schemas/routes/migrations/startup, investigation service,
+new action_policy.py, frontend operations component/helpers/styles/types,
+agent/action-engine tests, existing SDK regression, README and these records.
+Current-key scans found no matches in source, 86 Git-history blobs or frontend build.
+No credentials printed, committed or sent to frontend; no commit, push or publication.
+
+Final restart verification preserved the completed investigation and executed request.
+Replaying investigation returned HTTP 200 without new events or paid requests.

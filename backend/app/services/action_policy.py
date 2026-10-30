@@ -74,11 +74,14 @@ def validate_recommendations(db, inspection, order, result):
         if not finding_refs:
             raise ValueError("unreferenced_finding")
         if finding["type"] == "OPERATIONAL_CONSTRAINT":
+            held = (order.status == "HELD" and finding.get("product_id") is None
+                    and finding.get("quantity") is None and f"order:{order.id}" in finding_refs)
             shortage = next((row for row in inspection.discrepancies if row.type == "SHORTFALL"
                             and row.product_id == finding.get("product_id") and row.observed_quantity is not None), None)
-            if (finding.get("quantity") is not None or shortage is None
-                    or f"inventory:{finding.get('product_id')}" not in finding_refs
-                    or available_quantity(db, shortage.product_id) >= shortage.required_quantity - shortage.observed_quantity):
+            insufficient = (finding.get("quantity") is None and shortage is not None
+                    and f"inventory:{finding.get('product_id')}" in finding_refs
+                    and available_quantity(db, shortage.product_id) < shortage.required_quantity - shortage.observed_quantity)
+            if not held and not insufficient:
                 raise ValueError("unsupported_constraint")
             continue
         matching = [row for row in inspection.discrepancies if row.product_id == finding.get("product_id")

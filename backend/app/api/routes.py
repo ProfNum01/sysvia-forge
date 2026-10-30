@@ -151,6 +151,8 @@ def create_inspection(request, db, order_id, image, rights_confirmed, parent=Non
                 raise HTTPException(409, "This idempotency key belongs to different inspection evidence.")
             return inspection_out(existing)
     order = required(db, Order, order_id)
+    if order.shipping_status == "SHIPPED":
+        raise HTTPException(409, "A shipped order cannot accept replacement inspection evidence.")
     if order.latest_inspection_id:
         latest = required(db, Inspection, order.latest_inspection_id)
         if latest.status == "ANALYZING":
@@ -369,6 +371,14 @@ def finish_analysis(db, inspection, result, sam, products, observations, regions
             prior.resolved_by_inspection_id = inspection.id
             for discrepancy in prior.discrepancies:
                 discrepancy.status = "RESOLVED"
+            for action in prior.actions:
+                if action.status == "EXECUTED" and action.lifecycle_state == "AWAITING_REINSPECTION":
+                    action.lifecycle_state = "RESOLVED_BY_REINSPECTION"
+                    action.execution_details = {**(action.execution_details or {}),
+                        "reinspection_required": False, "resolved_by_inspection_id": inspection.id,
+                        "resolved_by_photo_id": inspection.photo_id, "previous_photo_id": prior.photo_id}
+                    audit(db, "ACTION_RESOLVED_BY_REINSPECTION", inspection.id,
+                        {"action_id": action.id, "previous_photo_id": prior.photo_id, "new_photo_id": inspection.photo_id})
             prior = db.get(Inspection, prior.previous_inspection_id) if prior.previous_inspection_id else None
         db.flush()
         if unresolved_escalation(db, order.id):
@@ -411,21 +421,30 @@ def investigate(request: Request, inspection_id: str,
                 raise HTTPException(409, "This investigation idempotency key belongs to another inspection.")
         if inspection.investigation_status in {"RUNNING", "COMPLETED"}:
             return inspection_out(inspection)
-        inspection.investigation_id = inspection.investigation_id or identifier()
-        inspection.investigation_key = idempotency_key or inspection.investigation_key
-        inspection.investigation_status = "RUNNING"
-        inspection.investigation_error = None
-        inspection.investigation_started_at = timestamp()
-        inspection.investigation_completed_at = None
-        attempt = inspection.investigation_started_at
+        attempt = timestamp()
+        changed = db.execute(update(Inspection).where(Inspection.id == inspection.id,
+            Inspection.investigation_status.in_(["NOT_STARTED", "FAILED"])).values(
+                investigation_id=inspection.investigation_id or identifier(),
+                investigation_key=idempotency_key or inspection.investigation_key,
+                investigation_status="RUNNING", investigation_error=None,
+                investigation_started_at=attempt, investigation_completed_at=None))
+        if not changed.rowcount:
+            db.rollback()
+            db.expire_all()
+            return inspection_out(required(db, Inspection, inspection_id))
         audit(db, "INVESTIGATION_STARTED", inspection.id, {"investigation_id": inspection.investigation_id}, actor)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "This investigation idempotency key belongs to another request.") from None
 
     def event(stage, details):
-        if stage not in {"TOOL_CALLED", "TOOL_COMPLETED", "EVIDENCE_RETRIEVED", "AGENT_MODEL_STARTED", "AGENT_MODEL_COMPLETED"}:
+        if stage not in {"TOOL_CALLED", "TOOL_COMPLETED", "EVIDENCE_RETRIEVED", "AGENT_MODEL_STARTED", "AGENT_MODEL_COMPLETED", "VALIDATION_FAILED"}:
             raise ValueError("unsupported_investigation_event")
         allowed = {"tool", "arguments", "result", "evidence_references", "order_id", "inspection_id", "product_id",
-                   "model", "http_status", "latency_ms", "usage", "ok", "request_index", "category", "status"}
+                   "model", "http_status", "latency_ms", "usage", "ok", "request_index", "category", "status",
+                   "reason", "validation_stage", "candidate"}
         safe = {key: value for key, value in details.items() if key in allowed}
         if len(json.dumps(safe, ensure_ascii=True)) > 20000:
             raise ValueError("oversized_investigation_event")
@@ -437,7 +456,7 @@ def investigate(request: Request, inspection_id: str,
                 audit(progress, stage, current.id, {**safe, "investigation_id": current.investigation_id}, "meta-read-tool")
                 progress.commit()
 
-    def failed(category, message, status, retryable=False, validation=False):
+    def failed(category, message, status, retryable=False, validation=False, reason=None):
         with request.app.state.mutations:
             db.expire_all()
             current = required(db, Inspection, inspection_id)
@@ -446,9 +465,12 @@ def investigate(request: Request, inspection_id: str,
                 raise HTTPException(409, "Investigation was interrupted or superseded.")
             current.investigation_status = "FAILED"
             current.investigation_error = {"category": category, "message": message, "retryable": retryable}
+            if reason in {"invalid_agent_decision", "unsupported_evidence", "unsupported_finding", "unsupported_action", "unsupported_decision"}:
+                current.investigation_error = {**current.investigation_error, "reason": reason}
             current.investigation_completed_at = timestamp()
             audit(db, "VALIDATION_FAILED" if validation else "INVESTIGATION_FAILED", current.id,
-                  {"category": category, "investigation_id": current.investigation_id})
+                  {"category": category, "investigation_id": current.investigation_id,
+                   "reason": current.investigation_error.get("reason")})
             db.commit()
         raise HTTPException(status, message)
 
@@ -456,8 +478,9 @@ def investigate(request: Request, inspection_id: str,
         summary = investigate_with_read_tools(db, inspection, order, on_event=event)
     except MetaConfigurationError:
         return failed("configuration", "MODEL_API_KEY is missing. Configure the root .env file.", 503)
-    except ValueError:
-        return failed("invalid_recommendation", "The agent returned an unsupported recommendation or tool request. No action was created.", 422, validation=True)
+    except ValueError as exc:
+        return failed("invalid_recommendation", "The agent returned an unsupported recommendation or tool request. No action was created.", 422,
+                      validation=True, reason=getattr(exc, "safe_reason", None))
     except Exception as exc:
         error = getattr(exc, "safe_error", None) or classify_api_error(exc)
         category = error["category"]
@@ -507,6 +530,8 @@ def investigate(request: Request, inspection_id: str,
 def validate_action(db, action):
     inspection = required(db, Inspection, action.inspection_id)
     order = require_current(db, inspection)
+    if order.shipping_status == "SHIPPED":
+        raise HTTPException(409, "A shipped order cannot execute corrective operations.")
     if inspection.status not in {"NEEDS_REVIEW", "HELD"}:
         raise HTTPException(409, "This evidence no longer supports a corrective action.")
     if action.type == "CREATE_PICKING_TASK":

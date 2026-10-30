@@ -79,7 +79,8 @@ describe("controlled operations interface", () => {
     ];
     expect(operationEvents(rows).map((event) => event.id)).toEqual([
       "two",
-      "three", "four",
+      "three",
+      "four",
     ]);
     expect(operationEvents([])).toEqual([]);
   });

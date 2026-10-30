@@ -223,3 +223,40 @@ class AgentInvestigationTests(unittest.TestCase):
         with patch("backend.app.services.investigation.MAX_TOOL_SECONDS", 0):
             with self.assertRaisesRegex(TimeoutError, "agent_timeout"):
                 self.run_agent()
+
+    def test_policy_rejection_emits_allowlisted_reason_and_safe_machine_candidate(self):
+        decision = self.decision(picking=True)
+        decision["summary"] = "sensitive-provider-or-model-prose"
+        decision["recommended_actions"][0]["product_id"] = "sensitive-unknown-product"
+        with self.assertRaises(ValueError) as caught:
+            self.run_agent(decision, self.all_reads())
+        self.assertEqual(caught.exception.safe_reason, "unsupported_action")
+        event = next(details for name, details in self.events if name == "VALIDATION_FAILED")
+        self.assertEqual(event["validation_stage"], "policy")
+        self.assertEqual(event["candidate"]["recommended_actions"][0]["product_id"], "UNSUPPORTED_PRODUCT")
+        self.assertNotIn("sensitive", json.dumps(event))
+
+    def test_schema_rejection_emits_safe_diagnostic_without_raw_model_text(self):
+        decision = self.decision()
+        decision["findings"][0]["quantity"] = 0
+        decision["summary"] = "sensitive-freeform-text"
+        with self.assertRaises(ValueError) as caught:
+            self.run_agent(decision)
+        self.assertEqual(caught.exception.safe_reason, "invalid_agent_decision")
+        event = next(details for name, details in self.events if name == "VALIDATION_FAILED")
+        self.assertEqual(event["validation_stage"], "schema")
+        self.assertEqual(event["candidate"]["findings"][0]["quantity"], 0)
+        self.assertNotIn("sensitive-freeform-text", json.dumps(event))
+
+    def test_held_order_is_an_actual_operational_constraint_with_null_quantity(self):
+        self.order.status = "HELD"
+        self.db.commit()
+        decision = self.decision()
+        decision["findings"].append({"type": "OPERATIONAL_CONSTRAINT", "product_id": None, "quantity": None,
+            "evidence_references": ["order:order-1001"]})
+        result = self.run_agent(decision)
+        self.assertEqual(result.findings[-1].type, "OPERATIONAL_CONSTRAINT")
+        self.order.status = "NEEDS_REVIEW"
+        self.db.commit()
+        with self.assertRaises(ValueError):
+            self.run_agent(decision)

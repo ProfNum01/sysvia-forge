@@ -3,7 +3,7 @@
 import json
 import time
 from contextlib import contextmanager
-from typing import Literal
+from typing import Literal, get_args
 import re
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -21,6 +21,8 @@ MAX_TOOL_CALLS = 8
 MAX_TOOL_OUTPUT_BYTES = 16_384
 MAX_TOTAL_OUTPUT_BYTES = 65_536
 MAX_DECISION_BYTES = 16_384
+VALIDATION_REASONS = frozenset({"invalid_agent_decision", "unsupported_evidence", "unsupported_finding",
+                               "unsupported_action", "unsupported_decision"})
 
 
 class StrictModel(BaseModel):
@@ -43,7 +45,9 @@ class AgentFinding(StrictModel):
     type: Literal["SHORTFALL", "EXCESS", "EXTRA_PRODUCT", "NOT_OBSERVED", "UNCERTAIN", "UNIDENTIFIED",
                   "GEOMETRY_UNCONFIRMED", "OPERATIONAL_CONSTRAINT"]
     product_id: str | None
-    quantity: int | None = Field(ge=1, le=10000)
+    quantity: int | None = Field(ge=1, le=10000, description=(
+        "SHORTFALL: required minus supported observed; EXCESS: observed minus required; EXTRA_PRODUCT: observed. "
+        "NOT_OBSERVED, UNCERTAIN, UNIDENTIFIED, GEOMETRY_UNCONFIRMED and OPERATIONAL_CONSTRAINT: null, never zero."))
     evidence_references: list[str] = Field(min_length=1, max_length=20)
 
 
@@ -71,6 +75,54 @@ class AgentProviderError(RuntimeError):
         super().__init__("meta_" + error["category"])
         self.status_code = error.get("http_status")
         self.safe_error = {"category": error["category"], "http_status": self.status_code}
+
+
+class AgentValidationError(ValueError):
+    """An allowlisted rejection reason suitable for audit and API diagnostics."""
+    def __init__(self, reason):
+        self.safe_reason = reason if reason in VALIDATION_REASONS else "invalid_agent_decision"
+        super().__init__(self.safe_reason)
+
+
+def _decision_diagnostic(raw, allowed_products, retrieved):
+    """Bounded machine fields only: no summary, prose, unknown identifiers or raw errors."""
+    if not isinstance(raw, dict):
+        return {"format": "unavailable"}
+
+    def enum(value, allowed):
+        return value if isinstance(value, str) and value in allowed else "UNSUPPORTED"
+
+    def references(value):
+        return [ref if isinstance(ref, str) and ref in retrieved else "UNRETRIEVED_REFERENCE"
+                for ref in value[:4]] if isinstance(value, list) else ["INVALID_REFERENCES"]
+
+    def rows(value, model):
+        cleaned = []
+        for row in value[:4] if isinstance(value, list) else []:
+            if not isinstance(row, dict):
+                cleaned.append({"format": "invalid"})
+                continue
+            product_id = row.get("product_id")
+            quantity = row.get("quantity")
+            item = {"type": enum(row.get("type"), get_args(model.model_fields["type"].annotation)),
+                "product_id": product_id if product_id is None or isinstance(product_id, str) and product_id in allowed_products else "UNSUPPORTED_PRODUCT",
+                "quantity": quantity if quantity is None or type(quantity) is int and -10000 <= quantity <= 10000 else "INVALID_QUANTITY",
+                "evidence_references": references(row.get("evidence_references"))}
+            if model is RecommendedAction:
+                item["requires_approval"] = row.get("requires_approval") if type(row.get("requires_approval")) is bool else "INVALID_BOOLEAN"
+            cleaned.append(item)
+        return cleaned
+
+    diagnostic = {"decision": enum(raw.get("decision"), get_args(InvestigationSummary.model_fields["decision"].annotation)),
+        "findings": rows(raw.get("findings"), AgentFinding),
+        "recommended_actions": rows(raw.get("recommended_actions"), RecommendedAction),
+        "evidence_references": references(raw.get("evidence_references")),
+        "verification_required": raw.get("verification_required") if type(raw.get("verification_required")) is bool else "INVALID_BOOLEAN"}
+    if len(json.dumps(diagnostic).encode("utf-8")) > 4096:
+        diagnostic["evidence_references"] = []
+        for row in diagnostic["findings"] + diagnostic["recommended_actions"]:
+            row["evidence_references"] = []
+    return diagnostic
 
 
 def _time_remaining(deadline):
@@ -221,6 +273,8 @@ def _validate_decision(db, result, inspection, order, retrieved):
         operational = finding.type == "OPERATIONAL_CONSTRAINT" and finding.product_id in shortfalls and (
             "inventory:" + finding.product_id in finding.evidence_references and
             available_quantity(db, finding.product_id) < shortfalls[finding.product_id][0])
+        operational |= (finding.type == "OPERATIONAL_CONSTRAINT" and finding.product_id is None and
+                        order.status == "HELD" and "order:" + order.id in finding.evidence_references)
         if (not matches and not operational) or finding.quantity != expected:
             raise ValueError("unsupported_finding")
         if finding.type == "SHORTFALL" and finding.product_id not in shortfalls:
@@ -289,9 +343,15 @@ def investigate_with_read_tools(db, inspection, order, on_event=None):
         "Picking does not correct or verify a photo; require physical correction and new-photo reinspection. "
         "No write tools or release action exist. Every action requires operator approval. "
         "Use ONLY evidence references exactly returned by tools, never fabricated IDs or quantities. "
-        "Findings match database discrepancy types, or OPERATIONAL_CONSTRAINT for insufficient stock. "
+        "Findings match database discrepancy types. OPERATIONAL_CONSTRAINT can cite authoritative insufficient "
+        "stock (product_id set) or an existing HELD order (product_id=null, cite its order reference). "
+        "Finding quantities: SHORTFALL=required minus supported observed, EXCESS=observed minus required, "
+        "EXTRA_PRODUCT=observed; NOT_OBSERVED, UNCERTAIN, UNIDENTIFIED, GEOMETRY_UNCONFIRMED and "
+        "OPERATIONAL_CONSTRAINT must have quantity=null, NEVER zero or a guessed missing count. "
         "Actions: HOLD_SHIPMENT, CREATE_PICKING_TASK, REQUEST_REINSPECTION, ESCALATE_TO_HUMAN. "
-        "Non-picking actions have product_id=null and quantity=null. No confidence scores or internal reasoning traces. "
+        "Non-picking actions have product_id=null and quantity=null. Do not propose duplicate existing actions; "
+        "if an order is already HELD, prefer escalation or new-photo reinspection over another hold. "
+        "No confidence scores or internal reasoning traces. "
         "When enough evidence is retrieved, stop calling tools and state readiness for the structured decision."},
         {"role": "user", "content": json.dumps({"order_id": order.id, "inspection_id": inspection.id})}]
     used, call_ids, retrieved = set(), set(), set()
@@ -303,6 +363,14 @@ def investigate_with_read_tools(db, inspection, order, on_event=None):
             on_event(name, details)
         else:
             audit(db, name, inspection.id, details, actor="meta-read-tool")
+
+    def reject(reason, stage, raw=None):
+        safe = AgentValidationError(reason)
+        products = {line.product_id for line in order.items} | {row.product_id for row in inspection.observations if row.product_id}
+        candidate = _decision_diagnostic(raw, products, retrieved)
+        candidate = json.loads(json.dumps(candidate).replace(config.api_key, "[REDACTED]"))
+        emit("VALIDATION_FAILED", {"reason": safe.safe_reason, "validation_stage": stage, "candidate": candidate})
+        raise safe from None
 
     def complete(**kwargs):
         nonlocal request_count
@@ -383,7 +451,8 @@ def investigate_with_read_tools(db, inspection, order, on_event=None):
         messages.append({"role": "user", "content": "Return the final structured decision now with all schema fields. "
             "Every finding/action cites retrieved evidence. requires_approval=true and verification_required=true. "
             "Use HUMAN_REVIEW_REQUIRED with ESCALATE_TO_HUMAN or REQUEST_REINSPECTION for uncertainty. "
-            "Do not label NOT_OBSERVED as SHORTFALL. Legacy recommendation is REQUEST_REVIEW for review, "
+            "Do not label NOT_OBSERVED as SHORTFALL. Finding quantity=null for NOT_OBSERVED, UNCERTAIN, "
+            "UNIDENTIFIED, GEOMETRY_UNCONFIRMED or OPERATIONAL_CONSTRAINT, never zero. Legacy recommendation is REQUEST_REVIEW for review, "
             "CREATE_PICKING_TASK only for supported picking, otherwise HOLD_ORDER."})
         schema = InvestigationSummary.model_json_schema()
         schema["required"] = list(InvestigationSummary.model_fields)
@@ -392,15 +461,19 @@ def investigate_with_read_tools(db, inspection, order, on_event=None):
         content = choice.message.content
         if (choice.finish_reason != "stop" or choice.message.tool_calls or getattr(choice.message, "refusal", None)
                 or not isinstance(content, str) or len(content.encode("utf-8")) > MAX_DECISION_BYTES):
-            raise ValueError("invalid_agent_decision")
+            reject("invalid_agent_decision", "schema")
+        raw = None
         try:
             raw = json.loads(content)
             if not isinstance(raw, dict) or set(raw) != set(InvestigationSummary.model_fields):
                 raise ValueError("invalid_agent_decision")
             result = InvestigationSummary.model_validate(raw)
         except (ValueError, ValidationError, TypeError):
-            raise ValueError("invalid_agent_decision") from None
-        _validate_decision(db, result, inspection, order, retrieved)
+            reject("invalid_agent_decision", "schema", raw)
+        try:
+            _validate_decision(db, result, inspection, order, retrieved)
+        except ValueError as error:
+            reject(str(error), "policy", raw)
         _time_remaining(deadline)
         return result
     finally:
