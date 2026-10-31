@@ -10,15 +10,15 @@
 :root {
   font-family: var(--font-sans);
   color: #e8eefb;
-  background: #0b111e;
+  background: #0d1525;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   font-weight: 400;
   font-size: 14px;
-  --bg: #0b111e;
-  --surface: #101827;
-  --surface-raised: #151f31;
+  --bg: #0d1525;
+  --surface: #111929;
+  --surface-raised: #172031;
   --border: #263145;
   --text: #e8eefb;
   --muted: #9aaac2;
@@ -3231,3 +3231,184 @@ td:last-child {
 .demo-asset a[aria-disabled="true"] { opacity: .5; pointer-events: none; }
 @media (max-width: 1050px) { .demo-assets { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .demo-assets { grid-template-columns: 1fr; } .demo-status-row { display: grid; } .demo-truth { padding: 16px; } }
+
+/* === Token Setup Banner === */
+.token-setup-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: linear-gradient(135deg, #1a2d4d, #112038);
+  border: 1px solid #3d5f9a;
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin: 20px 36px 0;
+  box-shadow: 0 4px 20px #0c1e3833;
+}
+.token-banner-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  background: #253d6b;
+  border: 1px solid #4a6fa3;
+  border-radius: 10px;
+  color: #7eb3ff;
+  flex-shrink: 0;
+}
+.token-banner-body {
+  flex: 1;
+  min-width: 0;
+}
+.token-banner-body strong {
+  font-size: 13px;
+  color: #c5d8f8;
+}
+.token-banner-body p {
+  font-size: 11px;
+  color: #8aacdb;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.token-banner-body code {
+  font-family: Consolas, monospace;
+  background: #1e3358;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  color: #a3c4ff;
+}
+
+/* === Demo Token Prompt === */
+.demo-token-prompt {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #111e30;
+  border: 1px dashed #3d5882;
+  border-radius: 9px;
+  padding: 16px 18px;
+  margin-bottom: 18px;
+  color: #8aacdb;
+}
+.demo-token-prompt strong {
+  font-size: 13px;
+  color: #c2d8f7;
+  display: block;
+  margin-bottom: 4px;
+}
+.demo-token-prompt p {
+  font-size: 11px;
+  color: #7b9cc2;
+  line-height: 1.5;
+  margin: 0;
+}
+.demo-token-prompt > svg {
+  flex-shrink: 0;
+  color: #5b8fd4;
+}
+.demo-token-prompt > div {
+  flex: 1;
+}
+
+/* === Workflow Steps === */
+.workflow-steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: #0f1a2b;
+  border: 1px solid #253447;
+  border-radius: 10px;
+  padding: 14px 20px;
+  margin-bottom: 22px;
+  overflow-x: auto;
+}
+.workflow-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.workflow-step-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  background: #1b2a40;
+  border: 1.5px solid #344d6b;
+  color: #6a85ab;
+  flex-shrink: 0;
+}
+.workflow-step.active .workflow-step-circle {
+  background: #1e3d78;
+  border-color: #5882d4;
+  color: #9dbfff;
+  box-shadow: 0 0 12px #3560b233;
+}
+.workflow-step.done .workflow-step-circle {
+  background: #153a2c;
+  border-color: #2f6b52;
+  color: #5fc99a;
+}
+.workflow-step-info {
+  display: flex;
+  flex-direction: column;
+}
+.workflow-step-info span {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8fa6c5;
+}
+.workflow-step-info small {
+  font-size: 10px;
+  color: #5a7494;
+}
+.workflow-step.active .workflow-step-info span {
+  color: #c5d8ff;
+}
+.workflow-step.done .workflow-step-info span {
+  color: #68c9a0;
+}
+.workflow-step-connector {
+  display: block;
+  width: 32px;
+  height: 1.5px;
+  background: #253447;
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+.workflow-step.done + .workflow-step .workflow-step-connector,
+.workflow-step.active + .workflow-step .workflow-step-connector {
+  background: #3d5882;
+}
+
+/* === Token Input === */
+.token-input-wrap {
+  position: relative;
+  display: flex;
+  gap: 0;
+}
+.token-input-wrap input {
+  flex: 1;
+  border-radius: 7px 0 0 7px;
+  border-right: none;
+}
+.token-reveal-btn {
+  background: #162235;
+  border: 1px solid #34435a;
+  border-left: none;
+  border-radius: 0 7px 7px 0;
+  color: #8aacdb;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 14px;
+  min-width: 52px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.token-reveal-btn:hover {
+  background: #1e3358;
+  color: #c2d8f7;
+}

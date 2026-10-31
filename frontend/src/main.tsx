@@ -202,6 +202,30 @@ function Loading() {
     </div>
   );
 }
+function TokenSetupBanner() {
+  const { token } = useContext(TokenContext);
+  if (token) return null;
+  return (
+    <div className="token-setup-banner" role="alert">
+      <div className="token-banner-icon">
+        <LockKeyhole size={20} aria-hidden="true" />
+      </div>
+      <div className="token-banner-body">
+        <strong>Operator token required</strong>
+        <p>
+          Set your session token in Settings to upload evidence, run analysis, and approve actions.
+          Find it in your backend <code>.env</code> file as <code>OPERATOR_TOKEN</code>.
+        </p>
+      </div>
+      <Button asChild size="sm">
+        <Link to="/settings">
+          <Settings2 size={14} aria-hidden="true" />
+          Open Settings
+        </Link>
+      </Button>
+    </div>
+  );
+}
 function PageHeading({
   eyebrow,
   title,
@@ -357,6 +381,7 @@ function Shell() {
           </div>
         </header>
         <main id="main" tabIndex={-1}>
+          <TokenSetupBanner />
           <Routes>
             <Route path="/" element={<Overview />} />
             <Route path="/orders" element={<Orders />} />
@@ -1019,8 +1044,37 @@ function InspectionPage() {
       setRights(false);
     }
   }, [id, selected?.latest_inspection_id, setParams]);
+  const workflowStep = !id ? 1 : !current?.status || current.status === "UPLOADED" ? 2 : 
+    current.status === "ANALYZING" ? 2 : 
+    (current.observations?.length > 0 && current.status !== "VERIFIED") ? 3 : 
+    current.actions?.some(a => a.status === "PENDING_APPROVAL") ? 4 : 
+    current.status === "VERIFIED" ? 5 : 3;
+
   return (
     <>
+      <div className="workflow-steps" aria-label="Inspection workflow steps">
+        {[
+          { n: 1, label: "Upload", desc: "Add evidence image" },
+          { n: 2, label: "Analyze", desc: "Run AI inspection" },
+          { n: 3, label: "Investigate", desc: "Review findings" },
+          { n: 4, label: "Approve", desc: "Authorize actions" },
+          { n: 5, label: "Verify", desc: "Confirm outcome" },
+        ].map((step) => (
+          <div
+            key={step.n}
+            className={`workflow-step ${workflowStep === step.n ? "active" : ""} ${workflowStep > step.n ? "done" : ""}`}
+          >
+            <div className="workflow-step-circle">
+              {workflowStep > step.n ? <Check size={13} aria-hidden="true" /> : step.n}
+            </div>
+            <div className="workflow-step-info">
+              <span>{step.label}</span>
+              <small>{step.desc}</small>
+            </div>
+            {step.n < 5 && <span className="workflow-step-connector" />}
+          </div>
+        ))}
+      </div>
       <PageHeading
         eyebrow="PHYSICAL EVIDENCE"
         title="Visual Inspection"
@@ -1907,10 +1961,11 @@ function History() {
   );
 }
 function Demo() {
+  const { token } = useContext(TokenContext);
   return <>
     <PageHeading eyebrow="CONTROLLED PRESENTATION" title="Demo Workspace"
       description="Run the real ProofSight workflow with rights-cleared synthetic scenes and isolated seed orders." />
-    <DemoWorkspace />
+    <DemoWorkspace token={token} />
   </>;
 }
 function Settings() {
@@ -1921,6 +1976,7 @@ function Settings() {
   const { token, setToken } = useContext(TokenContext);
   const [draft, setDraft] = useState("");
   const [saved, setSaved] = useState(false);
+  const [showToken, setShowToken] = useState(false);
   return (
     <>
       <PageHeading
@@ -2012,23 +2068,33 @@ function Settings() {
           >
             <div className="field">
               <label htmlFor="operator-token">Operator session token</label>
-              <input
-                id="operator-token"
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                value={draft}
-                onChange={(e) => {
-                  setDraft(e.target.value);
-                  setSaved(false);
-                }}
-                placeholder="Enter the server-issued operator token"
-                aria-describedby="token-hint"
-              />
+              <div className="token-input-wrap">
+                <input
+                  id="operator-token"
+                  type={showToken ? "text" : "password"}
+                  autoComplete="off"
+                  spellCheck={false}
+                  autoFocus
+                  value={draft}
+                  onChange={(e) => {
+                    setDraft(e.target.value);
+                    setSaved(false);
+                  }}
+                  placeholder="Paste token from .env OPERATOR_TOKEN"
+                  aria-describedby="token-hint"
+                />
+                <button
+                  type="button"
+                  className="token-reveal-btn"
+                  aria-label={showToken ? "Hide token" : "Show token"}
+                  onClick={() => setShowToken((v) => !v)}
+                >
+                  {showToken ? "Hide" : "Show"}
+                </button>
+              </div>
               <p id="token-hint" className="form-hint">
-                Find the operator token in your local backend .env file
-                (OPERATOR_TOKEN). Kept in browser memory only; refreshing clears
-                it. The server determines your authorization.
+                Open <code>e:\Amiir_Work\SYSVIA\Hackthon\.env</code>, find <code>OPERATOR_TOKEN=…</code>,
+                copy the value and paste it above. Token stays in browser session memory only.
               </p>
             </div>
             <div className="button-row">

@@ -7,6 +7,9 @@ export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   // @ts-ignore
   test: {
+    globals: true,
+    environment: "jsdom",
+    setupFiles: [],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
   },
   server: {

@@ -13,12 +13,18 @@ describe("DemoWorkspace", () => {
     ]);
     client.setQueryData(["demo-assets"], [{ name: "missing", title: "Missing item scene", description: "Original fixture", url: "/api/demo/assets/missing", provenance: "original_synthetic_fixture" }]);
     client.setQueryData(["meta-status"], { configured: false });
-    const html = renderToStaticMarkup(<QueryClientProvider client={client}><MemoryRouter><DemoWorkspace /></MemoryRouter></QueryClientProvider>);
-    expect(html).toContain("DEMO-1");
-    expect(html).not.toContain("PRIVATE-2");
-    expect(html).toContain("Missing item scene");
-    expect(html).toContain("TEST FIXTURE");
-    expect(html).toContain("/inspection?order=ord-1&amp;demo=missing");
-    expect(html).toContain("Not configured");
+    // With token: orders section visible, use-in-inspection link present
+    const htmlWithToken = renderToStaticMarkup(<QueryClientProvider client={client}><MemoryRouter><DemoWorkspace token="test-token" /></MemoryRouter></QueryClientProvider>);
+    expect(htmlWithToken).toContain("DEMO-1");
+    expect(htmlWithToken).not.toContain("PRIVATE-2");
+    expect(htmlWithToken).toContain("Missing item scene");
+    expect(htmlWithToken).toContain("TEST FIXTURE");
+    expect(htmlWithToken).toContain("/inspection?order=ord-1&amp;demo=missing");
+    expect(htmlWithToken).toContain("Not configured");
+    // Without token: orders section hidden, assets still shown, set-token CTA present
+    const htmlNoToken = renderToStaticMarkup(<QueryClientProvider client={client}><MemoryRouter><DemoWorkspace token="" /></MemoryRouter></QueryClientProvider>);
+    expect(htmlNoToken).not.toContain("DEMO-1");
+    expect(htmlNoToken).toContain("Missing item scene");
+    expect(htmlNoToken).toContain("Set token to use");
   });
 });
