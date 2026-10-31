@@ -35,6 +35,7 @@ import {
   Camera,
   Clock3,
   Database,
+  Presentation,
   FileSearch,
   Fingerprint,
   GitBranch,
@@ -73,6 +74,7 @@ import {
   InspectionProgress,
   ProductComparison,
 } from "./components/inspection-evidence";
+import { DemoWorkspace } from "./components/demo-workspace";
 import { api, formatTime, label } from "./lib/api";
 import { validateImage } from "./lib/validation";
 import {
@@ -116,6 +118,7 @@ const nav = [
   { to: "/inspection", label: "Visual Inspection", icon: ScanLine },
   { to: "/operations", label: "AI Operations", icon: Sparkles },
   { to: "/history", label: "Verification History", icon: FileSearch },
+  { to: "/demo", label: "Demo Workspace", icon: Presentation },
   { to: "/settings", label: "Settings", icon: Settings2 },
 ];
 function Status({ value }: { value: string }) {
@@ -333,6 +336,7 @@ function Shell() {
             <Route path="/inspection" element={<InspectionPage />} />
             <Route path="/operations" element={<Operations />} />
             <Route path="/history" element={<History />} />
+            <Route path="/demo" element={<Demo />} />
             <Route path="/settings" element={<Settings />} />
             <Route
               path="*"
@@ -422,6 +426,20 @@ function Overview() {
                   note: "Require attention or review",
                   color: "amber",
                 },
+                {
+                  label: "Orders on hold",
+                  value: data.orders_on_hold,
+                  icon: LockKeyhole,
+                  note: "Shipping gate is active",
+                  color: "amber",
+                },
+                {
+                  label: "Human reviews",
+                  value: data.pending_human_reviews,
+                  icon: FileSearch,
+                  note: "Uncertain evidence or escalation",
+                  color: "violet",
+                },
               ].map((m) => (
                 <div className="metric" key={m.label}>
                   <div className="metric-top">
@@ -441,6 +459,21 @@ function Overview() {
                 </div>
               ))}
             </div>
+            <Panel title="Attention required" subtitle="Current orders with unresolved evidence or an active hold."
+              action={<span className="count-badge">{data.attention_required.length}</span>}>
+              {data.attention_required.length ? <div className="attention-list">
+                {data.attention_required.map((item) => <Link className="attention-row"
+                  key={item.order_id} to={`/inspection?id=${encodeURIComponent(item.inspection_id)}`}>
+                  <span><strong>{item.order_reference}</strong><small>{item.issue_types.length ?
+                    item.issue_types.map(label).join(", ") : "Order hold or reinspection required"}</small></span>
+                  <span className="attention-meta"><Status value={item.inspection_status} />
+                    {item.human_review_required && <span>Human review</span>}</span>
+                  <ArrowRight size={16} aria-hidden="true" />
+                </Link>)}
+              </div> : <Empty icon={ShieldCheck} title="No active issues">
+                Orders requiring action will appear here from current inspection records.
+              </Empty>}
+            </Panel>
             <div className="overview-grid">
               <Panel
                 title="Verification pipeline"
@@ -821,6 +854,7 @@ function InspectionTable({ inspections }: { inspections: Inspection[] }) {
 function InspectionPage() {
   const [params, setParams] = useSearchParams();
   const id = params.get("id");
+  const demoAsset = params.get("demo");
   const { token } = useContext(TokenContext);
   const initialOrder = params.get("order") ?? "";
   const [orderId, setOrderId] = useState(initialOrder);
@@ -874,6 +908,24 @@ function InspectionPage() {
     setFormError("");
     setSelectedRegionIds(params.get("region") ? [params.get("region")!] : []);
   }, [id, params]);
+  useEffect(() => {
+    if (!demoAsset) return;
+    const controller = new AbortController();
+    setReinspect(!!id);
+    setFormError("");
+    fetch(`/api/demo/assets/${encodeURIComponent(demoAsset)}`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("The selected synthetic asset is unavailable on the backend.");
+        const blob = await response.blob();
+        if (blob.type !== "image/png") throw new Error("The demo asset was not a PNG image.");
+        setFile(new File([blob], `proofsight-demo-${demoAsset}.png`, { type: "image/png" }));
+        setRights(true);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setFormError(error instanceof Error ? error.message : "Demo asset could not be loaded.");
+      });
+    return () => controller.abort();
+  }, [demoAsset, id]);
   const upload = useMutation({
     mutationFn: async () => {
       const error = validateImage(file, rights);
@@ -1300,6 +1352,7 @@ function InspectionPage() {
           </Panel>
           {current && !reinspect && (
             <>
+              <VerificationComparison inspection={current} />
               <InspectionResults
                 inspection={current}
                 selectedRegionIds={selectedRegionIds}
@@ -1542,6 +1595,71 @@ function InspectionResults({
     </>
   );
 }
+function VerificationComparison({ inspection }: { inspection: Inspection }) {
+  const { token } = useContext(TokenContext);
+  const previous = useQuery({
+    queryKey: ["inspection", inspection.previous_inspection_id],
+    queryFn: () => api<Inspection>(`/inspections/${inspection.previous_inspection_id}`),
+    enabled: !!inspection.previous_inspection_id,
+  });
+  const status = useQuery({
+    queryKey: ["verification-status", inspection.order_id, inspection.id],
+    queryFn: () => api<{verification_status: string; revision_current: boolean;
+      order_version: number; inspection_order_version: number | null;
+      picking_tasks: {id: string; product_id: string; quantity: number; status: string}[];
+      removal_tasks: {id: string; product_id: string; quantity: number; status: string}[]}>(
+      `/orders/${inspection.order_id}/verification-status`,
+      {headers: {Authorization: `Bearer ${token}`}}),
+    enabled: !!token,
+  });
+  if (!inspection.previous_inspection_id) return null;
+  return (
+    <Panel title="Before and after" subtitle="Saved visual evidence and server-calculated quantities.">
+      {previous.isPending ? <Loading /> : previous.isError ?
+        <ErrorState error={previous.error} retry={() => previous.refetch()} /> : previous.data && (
+          <>
+            <div className="verification-summary">
+              <p><strong>Final decision:</strong> {status.data ? label(status.data.verification_status) : label(inspection.status)}</p>
+              <p><strong>Order revision:</strong> {status.data ?
+                `${status.data.revision_current ? "Current" : "Changed"} (order ${status.data.order_version}, evidence ${status.data.inspection_order_version ?? "unknown"})` :
+                "Sign in to check the current order revision."}</p>
+              <p><strong>Original discrepancies:</strong> {previous.data.discrepancies.length ?
+                previous.data.discrepancies.map((item) => label(item.type)).join(", ") : "None recorded"}</p>
+              <p><strong>Current discrepancies:</strong> {inspection.discrepancies.length ?
+                inspection.discrepancies.map((item) => label(item.type)).join(", ") : "None recorded"}</p>
+              <p><strong>Corrective actions:</strong> {previous.data.actions.length ?
+                previous.data.actions.map((item) => `${label(item.type)}: ${label(item.status)}`).join(", ") : "None recorded"}</p>
+              <p><strong>Picking tasks:</strong> {status.data ?
+                status.data.picking_tasks.length ? status.data.picking_tasks.map((item) =>
+                  `${item.product_id} × ${item.quantity}: ${label(item.status)}`).join(", ") : "None" : "Sign in to view"}</p>
+              <p><strong>Removal tasks:</strong> {status.data ?
+                status.data.removal_tasks.length ? status.data.removal_tasks.map((item) =>
+                  `${item.product_id} × ${item.quantity}: ${label(item.status)}`).join(", ") : "None" : "Sign in to view"}</p>
+            </div>
+            <div className="verification-images">
+              {[previous.data, inspection].map((item, index) => (
+                <figure key={item.id}>
+                  <figcaption>{index === 0 ? "BEFORE CORRECTION" : "AFTER CORRECTION"} · {formatTime(item.created_at)} · {label(item.status)}</figcaption>
+                  <a href={item.image_url} target="_blank" rel="noreferrer" aria-label={`Open ${index === 0 ? "before" : "after"} evidence image`}>
+                    <img src={item.annotation_url ?? item.image_url} alt={`${index === 0 ? "Original" : "New"} inspection evidence`} />
+                  </a>
+                  <small>Photo ID: {item.photo_id}</small>
+                </figure>
+              ))}
+            </div>
+            <table className="comparison-table"><thead><tr><th>Product</th><th>Required</th><th>Before</th><th>After</th><th>Result</th></tr></thead>
+              <tbody>{inspection.comparison?.map((row) => {
+                const before = previous.data?.comparison?.find((item) => item.product_id === row.product_id);
+                return <tr key={row.product_id}><td>{row.name}</td><td>{row.required_quantity}</td>
+                  <td>{before?.observed_quantity ?? "Unknown"}</td><td>{row.observed_quantity ?? "Unknown"}</td>
+                  <td>{label(row.status)}</td></tr>;
+              })}</tbody>
+            </table>
+          </>
+        )}
+    </Panel>
+  );
+}
 function Investigation({
   inspection: i,
   isCurrent,
@@ -1689,6 +1807,13 @@ function History() {
       </div>
     </>
   );
+}
+function Demo() {
+  return <>
+    <PageHeading eyebrow="CONTROLLED PRESENTATION" title="Demo Workspace"
+      description="Run the real ProofSight workflow with rights-cleared synthetic scenes and isolated seed orders." />
+    <DemoWorkspace />
+  </>;
 }
 function Settings() {
   const q = useQuery({

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import unittest
 from unittest.mock import patch
 
@@ -101,21 +102,25 @@ class AgentInvestigationTests(unittest.TestCase):
 
     def all_reads(self):
         return [[("get_order_history", {"order_id": "order-1001"}),
+                 ("get_verification_history", {"order_id": "order-1001"}),
                  ("get_pending_actions", {"order_id": "order-1001"}),
                  ("check_inventory", {"product_id": "product-red"}),
                  ("get_inspection_results", {"inspection_id": "ins-1"}),
                  ("get_order_details", {"order_id": "order-1001"})]]
 
-    def test_dynamic_five_tools_return_database_evidence_without_mutations(self):
+    def test_dynamic_six_tools_return_database_evidence_without_mutations(self):
         result = self.run_agent(self.decision(picking=True), self.all_reads())
         self.assertEqual(result.recommended_actions[0].quantity, 1)
         self.assertEqual({tool["function"]["name"] for tool in self.requests[0]["tools"]},
-            {"get_order_details", "get_inspection_results", "check_inventory", "get_pending_actions", "get_order_history"})
+            {"get_order_details", "get_inspection_results", "check_inventory", "get_pending_actions",
+             "get_order_history", "get_verification_history"})
         self.assertEqual(self.requests[0]["tool_choice"], "auto")
         returned = [json.loads(message["content"]) for message in self.requests[-1]["messages"] if message["role"] == "tool"]
         inventory = next(value for value in returned if "quantity_available" in value)
         self.assertEqual(inventory["quantity_available"], 20)
         self.assertEqual(inventory["quantity_reserved"], 0)
+        history = next(value for value in returned if "inspections" in value)
+        self.assertEqual(history["inspections"][0]["id"], "ins-1")
         self.assertEqual(self.db.scalar(select(func.count()).select_from(CorrectiveAction)), 0)
         self.assertEqual(self.order.status, "NEEDS_REVIEW")
         completed = [details for name, details in self.events if name == "AGENT_MODEL_COMPLETED"]
@@ -132,6 +137,7 @@ class AgentInvestigationTests(unittest.TestCase):
     def test_invalid_tool_arguments_and_cross_order_access_fail_closed(self):
         bad = [("delete_order", {}), ("get_order_details", {"order_id": "order-1002"}),
                ("get_inspection_results", {"inspection_id": "other-inspection"}),
+               ("get_verification_history", {"order_id": "order-1002"}),
                ("check_inventory", {"product_id": "product-amber"}),
                ("get_order_details", {"order_id": "order-1001", "sql": "DROP TABLE orders"}),
                ("check_inventory", {"product_id": 123})]
@@ -170,12 +176,43 @@ class AgentInvestigationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported_action"):
             self.run_agent(self.decision(picking=True), self.all_reads())
 
+    def test_model_removal_requires_exact_grounded_excess(self):
+        discrepancy = self.db.get(Discrepancy, "disc-red")
+        discrepancy.type = "EXCESS"
+        discrepancy.observed_quantity = 3
+        self.inspection.regions = [*self.inspection.regions,
+            {"id": "red-1", "product_id": "product-red", "source": "sam-3.1", "box": {"left": 0,"top": 10,"right": 10,"bottom": 20}},
+            {"id": "red-2", "product_id": "product-red", "source": "sam-3.1", "box": {"left": 0,"top": 20,"right": 10,"bottom": 30}}]
+        for index in (1, 2):
+            self.db.add(InspectionObservation(id=f"obs-red-{index}", inspection_id="ins-1",
+                product_id="product-red", quantity=1, label_text="PS-RED-01", sku="PS-RED-01",
+                evidence="Mock distinct readable unit", identity_certain=True, count_certain=True,
+                identification_status="MATCHED", evidence_region_ids=[f"red-{index}"]))
+        self.db.commit()
+        refs = ["order:order-1001", "inspection:ins-1", "photo:photo-1", "discrepancy:disc-red",
+                "region:red-0", "region:red-1", "region:red-2"]
+        decision = {"summary": "Three supported red units exceed two required units.",
+            "recommendation": "HOLD_ORDER", "decision": "CORRECTIVE_ACTION_REQUIRED",
+            "findings": [{"type": "EXCESS", "product_id": "product-red", "quantity": 1,
+                          "evidence_references": ["discrepancy:disc-red", "region:red-0"]}],
+            "recommended_actions": [{"type": "CREATE_REMOVAL_TASK", "product_id": "product-red",
+                "quantity": 1, "requires_approval": True,
+                "evidence_references": ["discrepancy:disc-red", "region:red-0"]}],
+            "evidence_references": refs, "verification_required": True}
+        self.assertEqual(self.run_agent(decision).recommended_actions[0].type, "CREATE_REMOVAL_TASK")
+        decision["recommended_actions"][0]["quantity"] = 2
+        with self.assertRaises(ValueError):
+            self.run_agent(decision)
+
     def test_duplicate_tool_calls_and_oversized_outputs_are_bounded(self):
         repeated = [[("get_order_details", {"order_id": "order-1001"})]] * 2
         with self.assertRaisesRegex(ValueError, "invalid_tool_request"):
             self.run_agent(batches=repeated)
         with patch("backend.app.services.investigation.MAX_TOOL_OUTPUT_BYTES", 20, create=True):
             with self.assertRaisesRegex(ValueError, "tool_output_limit"):
+                self.run_agent()
+        with patch.dict(os.environ, {"PROOFSIGHT_AGENT_MAX_TOOL_CALLS": "1"}):
+            with self.assertRaisesRegex(ValueError, "agent_tool_limit"):
                 self.run_agent()
 
     def test_timeout_and_provider_failure_are_sanitized(self):
@@ -213,10 +250,10 @@ class AgentInvestigationTests(unittest.TestCase):
         result = self.run_agent(self.decision(picking=True), self.all_reads())
         self.assertEqual(result.recommended_actions[0].quantity, 1)
 
-    def test_five_dynamic_tool_rounds_still_leave_one_final_request(self):
+    def test_six_dynamic_tool_rounds_still_leave_one_final_request(self):
         batches = [[call] for call in self.all_reads()[0]]
         result = self.run_agent(self.decision(picking=True), batches)
-        self.assertEqual(len(self.requests), 6)
+        self.assertEqual(len(self.requests), 7)
         self.assertEqual(result.decision, "CORRECTIVE_ACTION_REQUIRED")
 
     def test_individual_tool_runtime_is_bounded(self):

@@ -9,6 +9,8 @@ export type Product = {
 };
 export type Order = {
   id: string;
+  version: number;
+  requirements_revision: string;
   reference: string;
   customer: string;
   status: string;
@@ -24,6 +26,15 @@ export type Order = {
     quantity: number;
     product: Product;
   }[];
+};
+export type VerificationStatus = {
+  order_id: string;
+  verification_status: string;
+  revision_current: boolean;
+  requires_reinspection: boolean;
+  shipping_status: string;
+  picking_tasks: { id: string; product_id: string; quantity: number; status: string }[];
+  removal_tasks: { id: string; product_id: string; quantity: number; status: string }[];
 };
 export type Observation = {
   id: string;
@@ -83,6 +94,8 @@ export type InvestigationResult = {
 };
 export type Inspection = {
   id: string;
+  order_version?: number | null;
+  requirements_revision?: string | null;
   order_id: string;
   status: string;
   photo_id: string;
@@ -175,6 +188,18 @@ export type Summary = {
   pending_inspections: number;
   verified_orders: number;
   active_discrepancies: number;
+  orders_on_hold: number;
+  pending_human_reviews: number;
+  attention_required: {
+    order_id: string;
+    order_reference: string;
+    inspection_id: string;
+    inspection_status: string;
+    shipping_status: string;
+    requires_reinspection: boolean;
+    issue_types: string[];
+    human_review_required: boolean;
+  }[];
   order_status_distribution: { status: string; count: number }[];
   recent_inspections: Inspection[];
   agent_activity: Audit[];
@@ -187,4 +212,11 @@ export type MetaStatus = {
   last_live_check: string | null;
   operator_auth_configured: boolean;
   configuration_location?: string;
+};
+export type DemoAsset = {
+  name: string;
+  title: string;
+  description: string;
+  provenance: "original_synthetic_fixture";
+  url: string;
 };

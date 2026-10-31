@@ -44,11 +44,12 @@ describe("controlled operations interface", () => {
       actionControls({ type: "UNRESTRICTED_SQL", status: "APPROVED" }),
     ).toEqual({ approve: false, reject: false, execute: false });
   });
-  it("supports legacy holds and all four policy action types without implying a physical correction", () => {
+  it("supports legacy holds and all five policy action types without implying a physical correction", () => {
     expect(actionName("HOLD_ORDER")).toBe("Hold Shipment");
     for (const type of [
       "HOLD_SHIPMENT",
       "CREATE_PICKING_TASK",
+      "CREATE_REMOVAL_TASK",
       "REQUEST_REINSPECTION",
       "ESCALATE_TO_HUMAN",
     ])
@@ -56,6 +57,7 @@ describe("controlled operations interface", () => {
     expect(actionImpact("CREATE_PICKING_TASK")).toMatch(
       /Inventory is not deducted/,
     );
+    expect(actionImpact("CREATE_REMOVAL_TASK")).toMatch(/not deducted/);
   });
   it("links only recognized evidence to its supported workspace target", () => {
     const context = {

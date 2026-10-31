@@ -16,10 +16,11 @@ from sqlalchemy.orm import object_session
 from pydantic import ValidationError
 
 from backend.app.models.database import (Approval, AuditEvent, CorrectiveAction, Discrepancy, Inspection,
-    InspectionObservation, Inventory, Order, PickingTask, Product, audit, identifier, timestamp)
+    InspectionObservation, Inventory, Order, PickingTask, RemovalTask, Product, audit, identifier, timestamp)
+from backend.app.core.config import ROOT
 from backend.app.schemas.responses import (ActionOut, AuditOut, DashboardOut, HealthOut, IdempotentRequest,
     EvidenceRegion, InspectionOut, MetaStatusOut, ObservationInput, OrderOut, ProductOut, RejectionRequest, ShippingRequest)
-from backend.app.services.action_policy import supported_shortfall, unresolved_escalation, validate_recommendations
+from backend.app.services.action_policy import supported_excess, supported_shortfall, unresolved_escalation, validate_recommendations
 from backend.app.services.catalog import reference_path
 from backend.app.services.investigation import investigate_with_read_tools
 from backend.app.services.inventory import available_quantity
@@ -29,6 +30,13 @@ from backend.app.services.reconciliation import reconcile
 from proofsight.meta_api import MetaConfig, MetaConfigurationError, classify_api_error
 
 router = APIRouter(prefix="/api")
+DEMO_ASSETS = {
+    "missing": ("Visible shortfall", "One red and one blue package in an original synthetic scene."),
+    "correct": ("Required visible count", "Two red and one blue package in an original synthetic scene."),
+    "extra": ("Additional product", "Two red, one blue, and one green package in an original synthetic scene."),
+    "ambiguous": ("Unreadable label", "A product label is deliberately unreadable in an original synthetic scene."),
+    "unidentified": ("Unidentified shape", "An additional unidentified object appears in an original synthetic scene."),
+}
 
 
 def database(request: Request):
@@ -71,6 +79,13 @@ def require_current(db, inspection):
     order = required(db, Order, inspection.order_id)
     if order.latest_inspection_id != inspection.id:
         raise HTTPException(409, "A newer inspection exists. This evidence and its actions are superseded.")
+    db.refresh(order)
+    for item in order.items:
+        db.refresh(item)
+        db.refresh(item.product)
+    if (inspection.requirements_revision != order.requirements_revision
+            or inspection.order_version != order.version):
+        raise HTTPException(409, "Order requirements changed. Submit new evidence for the current revision.")
     return order
 
 
@@ -88,6 +103,26 @@ def orders(db=Depends(database)):
 @router.get("/products", response_model=list[ProductOut])
 def product_catalog(db=Depends(database)):
     return list(db.scalars(select(Product).order_by(Product.sku)))
+
+
+@router.get("/demo/assets")
+def demo_assets():
+    folder = ROOT / "data" / "fixtures"
+    return [{"name": name, "title": title, "description": description,
+             "provenance": "original_synthetic_fixture", "url": f"/api/demo/assets/{name}"}
+            for name, (title, description) in DEMO_ASSETS.items()
+            if (folder / f"task002-{name}.png").is_file()]
+
+
+@router.get("/demo/assets/{name}")
+def demo_asset(name: str):
+    if name not in DEMO_ASSETS:
+        raise HTTPException(404, "Demo asset was not found.")
+    path = ROOT / "data" / "fixtures" / f"task002-{name}.png"
+    if not path.is_file():
+        raise HTTPException(404, "Demo asset is unavailable on this installation.")
+    return FileResponse(path, media_type="image/png", headers={
+        "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/products/{product_id}/reference")
@@ -111,10 +146,29 @@ def inspections(db=Depends(database)):
 
 @router.get("/dashboard/summary", response_model=DashboardOut)
 def dashboard(db=Depends(database)):
-    states = Counter(db.scalars(select(Order.status)))
+    orders = list(db.scalars(select(Order).order_by(Order.reference)))
+    states = Counter(order.status for order in orders)
+    attention = []
+    human_review = 0
+    uncertain_types = {"NOT_OBSERVED", "UNCERTAIN", "UNIDENTIFIED", "GEOMETRY_UNCONFIRMED"}
+    for order in orders:
+        current = db.get(Inspection, order.latest_inspection_id) if order.latest_inspection_id else None
+        issues = sorted({row.type for row in current.discrepancies if row.status == "OPEN"}) if current else []
+        needs_review = bool(current and (any(item in uncertain_types for item in issues)
+            or any(action.type == "ESCALATE_TO_HUMAN" and action.status not in {"REJECTED", "SUPERSEDED"}
+                   for action in current.actions)))
+        human_review += int(needs_review)
+        if current and (issues or order.shipping_status == "HELD" or order.requires_reinspection):
+            attention.append({"order_id": order.id, "order_reference": order.reference,
+                "inspection_id": current.id, "inspection_status": current.status,
+                "shipping_status": order.shipping_status, "requires_reinspection": order.requires_reinspection,
+                "issue_types": issues, "human_review_required": needs_review})
     return {
         "total_orders": sum(states.values()), "pending_inspections": sum(v for k, v in states.items() if k != "VERIFIED"),
         "verified_orders": states["VERIFIED"],
+        "orders_on_hold": sum(order.shipping_status == "HELD" for order in orders),
+        "pending_human_reviews": human_review,
+        "attention_required": attention[:8],
         "active_discrepancies": db.scalar(select(func.count()).select_from(Discrepancy)
             .join(Order, Order.latest_inspection_id == Discrepancy.inspection_id).where(Discrepancy.status == "OPEN")),
         "order_status_distribution": [{"status": status, "count": count} for status, count in states.items()],
@@ -165,6 +219,15 @@ def create_inspection(request, db, order_id, image, rights_confirmed, parent=Non
             raise HTTPException(409, "Reinspection must use the latest inspection.")
     if parent is not None and parent.status in {"UPLOADED", "ANALYZING"}:
         raise HTTPException(409, "Analyze the current image before requesting reinspection.")
+    if parent is not None and any(action.investigation_id and action.status != "EXECUTED"
+                                  for action in parent.actions):
+        raise HTTPException(409, "Approve and execute pending corrective actions before reinspection.")
+    if parent is not None and db.scalar(select(PickingTask.id).where(
+            PickingTask.order_id == order.id, PickingTask.status != "COMPLETED").limit(1)):
+        raise HTTPException(409, "Report physical picking completion before submitting new evidence.")
+    if parent is not None and db.scalar(select(RemovalTask.id).where(
+            RemovalTask.order_id == order.id, RemovalTask.status != "COMPLETED").limit(1)):
+        raise HTTPException(409, "Report physical removal completion before submitting new evidence.")
     if parent:
         prior = parent
         while prior:
@@ -173,13 +236,22 @@ def create_inspection(request, db, order_id, image, rights_confirmed, parent=Non
             prior = db.get(Inspection, prior.previous_inspection_id) if prior.previous_inspection_id else None
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(content)
-    inspection = Inspection(order_id=order.id, photo_id=photo_id, image_path=str(destination),
+    inspection = Inspection(order_id=order.id, requirements_revision=order.requirements_revision,
+                            order_version=order.version,
+                            photo_id=photo_id, image_path=str(destination),
                             image_sha256=digest, image_width=width, image_height=height, creation_key=creation_key,
                             processing_stage="IMAGE_VALIDATED", previous_inspection_id=parent.id if parent else None)
     try:
         db.add(inspection)
         db.flush()
         order.latest_inspection_id = inspection.id
+        if parent:
+            for action in parent.actions:
+                if action.investigation_id is None and action.status == "PROPOSED":
+                    action.status = "SUPERSEDED"
+                    action.lifecycle_state = "SUPERSEDED"
+                    audit(db, "AUTOMATIC_HOLD_SUPERSEDED", action.id,
+                          {"new_inspection_id": inspection.id, "new_photo_id": inspection.photo_id})
         if order.status != "HELD":
             order.status = "PENDING_INSPECTION"
         audit(db, "REINSPECTION_UPLOADED" if parent else "IMAGE_UPLOADED", inspection.id,
@@ -216,6 +288,61 @@ def reinspect(request: Request, inspection_id: str, image: Annotated[UploadFile,
 @router.get("/inspections/{inspection_id}/results", response_model=InspectionOut)
 def inspection_detail(inspection_id: str, db=Depends(database)):
     return inspection_out(required(db, Inspection, inspection_id))
+
+
+def inspection_chain(db, inspection):
+    chain = []
+    while inspection:
+        chain.append(inspection)
+        inspection = db.get(Inspection, inspection.previous_inspection_id) if inspection.previous_inspection_id else None
+    return list(reversed(chain))
+
+
+@router.get("/inspections/{inspection_id}/evidence", response_model=list[InspectionOut])
+def inspection_evidence(inspection_id: str, actor=Depends(supervisor), db=Depends(database)):
+    return [inspection_out(row) for row in inspection_chain(db, required(db, Inspection, inspection_id))]
+
+
+@router.get("/inspections/{inspection_id}/comparison")
+def inspection_comparison(inspection_id: str, actor=Depends(supervisor), db=Depends(database)):
+    chain = inspection_chain(db, required(db, Inspection, inspection_id))
+    return {"order_id": chain[-1].order_id,
+            "before": inspection_out(chain[0]), "after": inspection_out(chain[-1]),
+            "history_ids": [row.id for row in chain]}
+
+
+@router.get("/orders/{order_id}/verification-status")
+def verification_status(order_id: str, actor=Depends(supervisor), db=Depends(database)):
+    order = required(db, Order, order_id)
+    current = db.get(Inspection, order.latest_inspection_id) if order.latest_inspection_id else None
+    revision_current = bool(current and current.requirements_revision == order.requirements_revision
+                            and current.order_version == order.version)
+    tasks = list(db.scalars(select(PickingTask).where(PickingTask.order_id == order_id)
+        .order_by(PickingTask.created_at, PickingTask.id)))
+    removal_tasks = list(db.scalars(select(RemovalTask).where(RemovalTask.order_id == order_id)
+        .order_by(RemovalTask.created_at, RemovalTask.id)))
+    return {"order_id": order.id, "inspection_id": current.id if current else None,
+            "verification_status": ("STALE_ORDER" if current and not revision_current else
+                                    current.status if current else "AWAITING_EVIDENCE"),
+            "requirements_revision": order.requirements_revision,
+            "order_version": order.version,
+            "inspection_revision": current.requirements_revision if current else None,
+            "inspection_order_version": current.order_version if current else None,
+            "revision_current": revision_current,
+            "picking_tasks": [{"id": task.id, "product_id": task.product_id,
+                               "quantity": task.quantity, "status": task.status} for task in tasks],
+            "removal_tasks": [{"id": task.id, "product_id": task.product_id,
+                               "quantity": task.quantity, "status": task.status} for task in removal_tasks],
+            "reconciliation_status": current.reconciliation_status if current else None,
+            "requires_reinspection": order.requires_reinspection,
+            "shipping_status": order.shipping_status}
+
+
+@router.get("/orders/{order_id}/verification-history", response_model=list[InspectionOut])
+def verification_history(order_id: str, actor=Depends(supervisor), db=Depends(database)):
+    required(db, Order, order_id)
+    return [inspection_out(row) for row in db.scalars(select(Inspection).where(
+        Inspection.order_id == order_id).order_by(Inspection.created_at, Inspection.id))]
 
 
 @router.get("/inspections/{inspection_id}/image")
@@ -360,9 +487,27 @@ def finish_analysis(db, inspection, result, sam, products, observations, regions
         "sam_latency_ms": sam.get("latency_ms"), "sam_model": "sam-3.1", "total_latency_ms": latency_ms,
         "muse_http_status": result["muse"].get("http_status"), "sam_http_status": sam.get("http_status"),
         "sam_requests": sam.get("requests"), "analysis_version": 2}
-    if reconciliation["verified"]:
+    prior_ids = []
+    prior = db.get(Inspection, inspection.previous_inspection_id) if inspection.previous_inspection_id else None
+    while prior:
+        prior_ids.append(prior.id)
+        prior = db.get(Inspection, prior.previous_inspection_id) if prior.previous_inspection_id else None
+    unresolved_actions = list(db.scalars(select(CorrectiveAction).where(
+        CorrectiveAction.inspection_id.in_(prior_ids),
+        CorrectiveAction.status.not_in(["EXECUTED", "SUPERSEDED"])))) if prior_ids else []
+    open_picking = list(db.scalars(select(PickingTask).where(
+        PickingTask.order_id == order.id, PickingTask.status != "COMPLETED")))
+    open_removal = list(db.scalars(select(RemovalTask).where(
+        RemovalTask.order_id == order.id, RemovalTask.status != "COMPLETED")))
+    eligible = reconciliation["verified"] and not unresolved_actions and not open_picking and not open_removal
+    if eligible:
+        claimed = db.execute(update(Order).where(Order.id == order.id,
+            Order.version == inspection.order_version,
+            Order.latest_inspection_id == inspection.id).values(status="VERIFIED"))
+        if not claimed.rowcount:
+            db.rollback()
+            raise HTTPException(409, "Order requirements changed during verification.")
         inspection.status = "VERIFIED"
-        order.status = "VERIFIED"
         order.preparation_status = "VERIFIED_BY_NEW_EVIDENCE"
         order.requires_reinspection = False
         order.shipping_status = "NOT_READY"
@@ -388,11 +533,21 @@ def finish_analysis(db, inspection, result, sam, products, observations, regions
               "previous_inspection_id": inspection.previous_inspection_id})
     else:
         inspection.status = "NEEDS_REVIEW"
+        order.requires_reinspection = True
+        order.shipping_status = "HELD"
         if order.status != "HELD":
             order.status = "NEEDS_REVIEW"
-        db.add(CorrectiveAction(inspection_id=inspection.id, type="HOLD_ORDER",
-                               proposal="Hold this order for human review. Visual evidence has unresolved discrepancies."))
-        audit(db, "DISCREPANCIES_DETECTED", inspection.id, {"count": len(reconciliation["discrepancies"])})
+        if reconciliation["discrepancies"]:
+            db.add(CorrectiveAction(inspection_id=inspection.id, type="HOLD_ORDER",
+                                   proposal="Hold this order for human review. Visual evidence has unresolved discrepancies."))
+            audit(db, "DISCREPANCIES_DETECTED", inspection.id, {"count": len(reconciliation["discrepancies"])})
+        else:
+            audit(db, "VERIFICATION_BLOCKED", inspection.id,
+                  {"pending_action_ids": [a.id for a in unresolved_actions],
+                   "open_picking_task_ids": [task.id for task in open_picking]})
+            if open_removal:
+                audit(db, "REMOVAL_TASKS_OPEN", inspection.id,
+                      {"task_ids": [task.id for task in open_removal]})
     latency_ms += round((time.perf_counter()-finish_start)*1000)
     inspection.provider_metadata = {**inspection.provider_metadata, "total_latency_ms": latency_ms}
     audit(db, "ANALYSIS_COMPLETED", inspection.id, {"status": inspection.status, "models": ["muse-spark-1.3", "sam-3.1"]})
@@ -537,6 +692,9 @@ def validate_action(db, action):
     if action.type == "CREATE_PICKING_TASK":
         if not inspection.investigation or not supported_shortfall(db, inspection, action.product_id, action.quantity):
             raise HTTPException(409, "Current evidence and inventory do not authorize this picking task.")
+    elif action.type == "CREATE_REMOVAL_TASK":
+        if not inspection.investigation or not supported_excess(inspection, action.product_id, action.quantity):
+            raise HTTPException(409, "Current evidence does not authorize this removal task.")
     elif action.type not in {"HOLD_ORDER", "HOLD_SHIPMENT", "REQUEST_REINSPECTION", "ESCALATE_TO_HUMAN"}:
         raise HTTPException(422, "Action type is not permitted by deterministic policy.")
     return inspection, order
@@ -604,6 +762,22 @@ def execute(request: Request, action_id: str, body: IdempotentRequest, actor=Dep
                     "order_id": task.order_id, "order_reference": task.order_reference, "product_id": task.product_id,
                     "product_reference": task.product_reference, "quantity": task.quantity, "created_at": task.created_at,
                     "approval_id": task.approval_id, "reinspection_required": True, "inventory_mutated": False}
+            elif action.type == "CREATE_REMOVAL_TASK":
+                product = required(db, Product, action.product_id)
+                task = RemovalTask(id=f"remove-{action.id}", action_id=action.id, approval_id=approval.id,
+                    order_id=order.id, order_reference=order.reference, product_id=product.id,
+                    product_reference=product.sku, quantity=action.quantity, status="OPEN")
+                db.add(task)
+                db.flush()
+                order.preparation_status = "REMOVAL_TASK_OPEN"
+                action.execution_details = {"task_id": task.id, "status": task.status,
+                    "order_id": task.order_id, "order_reference": task.order_reference,
+                    "product_id": task.product_id, "product_reference": task.product_reference,
+                    "quantity": task.quantity, "created_at": task.created_at,
+                    "approval_id": task.approval_id, "reinspection_required": True, "inventory_mutated": False,
+                    "required_product_review_ids": sorted({row.product_id for row in inspection.discrepancies
+                        if row.type == "NOT_OBSERVED" and row.product_id}),
+                    "replacement_decision": "OPERATOR_MUST_CONFIRM"}
             elif action.type == "REQUEST_REINSPECTION":
                 order.preparation_status = "NEW_EVIDENCE_REQUIRED"
                 action.execution_details = {"order_id": order.id, "previous_photo_id": inspection.photo_id,
@@ -668,6 +842,48 @@ def reject(request: Request, action_id: str, body: RejectionRequest, actor=Depen
         return action
 
 
+@router.post("/picking-tasks/{task_id}/complete")
+def complete_picking_task(request: Request, task_id: str, body: IdempotentRequest,
+                          actor=Depends(supervisor), db=Depends(database)):
+    with request.app.state.mutations:
+        task = required(db, PickingTask, task_id)
+        if task.status == "COMPLETED":
+            prior = db.scalar(select(AuditEvent).where(AuditEvent.event_type == "PICKING_TASK_COMPLETED",
+                AuditEvent.entity_id == task.id))
+            if prior and prior.details.get("idempotency_key") == body.idempotency_key:
+                return {"id": task.id, "status": task.status, "order_id": task.order_id}
+            raise HTTPException(409, "Picking task was completed by a different request.")
+        if task.status != "OPEN":
+            raise HTTPException(409, "Only an open picking task can be completed.")
+        task.status = "COMPLETED"
+        audit(db, "PICKING_TASK_COMPLETED", task.id,
+              {"order_id": task.order_id, "idempotency_key": body.idempotency_key,
+               "physical_completion_reported": True, "visual_verification": False}, actor)
+        db.commit()
+        return {"id": task.id, "status": task.status, "order_id": task.order_id}
+
+
+@router.post("/removal-tasks/{task_id}/complete")
+def complete_removal_task(request: Request, task_id: str, body: IdempotentRequest,
+                          actor=Depends(supervisor), db=Depends(database)):
+    with request.app.state.mutations:
+        task = required(db, RemovalTask, task_id)
+        if task.status == "COMPLETED":
+            prior = db.scalar(select(AuditEvent).where(AuditEvent.event_type == "REMOVAL_TASK_COMPLETED",
+                AuditEvent.entity_id == task.id))
+            if prior and prior.details.get("idempotency_key") == body.idempotency_key:
+                return {"id": task.id, "status": task.status, "order_id": task.order_id}
+            raise HTTPException(409, "Removal task was completed by a different request.")
+        if task.status != "OPEN":
+            raise HTTPException(409, "Only an open removal task can be completed.")
+        task.status = "COMPLETED"
+        audit(db, "REMOVAL_TASK_COMPLETED", task.id,
+              {"order_id": task.order_id, "idempotency_key": body.idempotency_key,
+               "physical_completion_reported": True, "visual_verification": False}, actor)
+        db.commit()
+        return {"id": task.id, "status": task.status, "order_id": task.order_id}
+
+
 @router.post("/orders/{order_id}/shipping-transition", response_model=OrderOut)
 def shipping_transition(request: Request, order_id: str, body: ShippingRequest, actor=Depends(supervisor), db=Depends(database)):
     with request.app.state.mutations:
@@ -679,7 +895,9 @@ def shipping_transition(request: Request, order_id: str, body: ShippingRequest, 
                 raise HTTPException(409, "This shipping request already used a different target.")
             return order
         inspection = required(db, Inspection, order.latest_inspection_id) if order.latest_inspection_id else None
-        if (not inspection or inspection.status != "VERIFIED" or order.status != "VERIFIED"
+        if (not inspection or inspection.order_version != order.version
+                or inspection.requirements_revision != order.requirements_revision
+                or inspection.status != "VERIFIED" or order.status != "VERIFIED"
                 or order.requires_reinspection or order.shipping_status == "HELD" or unresolved_escalation(db, order.id)):
             raise HTTPException(409, "Shipping requires a verified current photo and resolved operational holds.")
         if body.target == "SHIPPED" and order.shipping_status != "READY_TO_SHIP":

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from hashlib import sha256
+import json
 from uuid import uuid4
 
 from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Integer, JSON, String, Text, create_engine, event
@@ -41,6 +43,7 @@ class Product(Base):
 class Order(Base):
     __tablename__ = "orders"
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
     reference: Mapped[str] = mapped_column(String, unique=True)
     customer: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="PENDING_INSPECTION")
@@ -51,6 +54,11 @@ class Order(Base):
     latest_inspection_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, default=timestamp)
     items: Mapped[list[OrderItem]] = relationship(order_by="OrderItem.id", lazy="selectin")
+
+    @property
+    def requirements_revision(self):
+        lines = sorted((item.id, item.product_id, item.product.sku, item.quantity) for item in self.items)
+        return sha256(json.dumps(lines, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 class OrderItem(Base):
@@ -76,6 +84,8 @@ class Inspection(Base):
     __tablename__ = "inspections"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=identifier)
     order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"))
+    requirements_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    order_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String, default="UPLOADED")
     photo_id: Mapped[str] = mapped_column(String, unique=True)
     image_path: Mapped[str] = mapped_column(String)
@@ -136,7 +146,7 @@ class Discrepancy(Base):
 
 class CorrectiveAction(Base):
     __tablename__ = "corrective_actions"
-    __table_args__ = (CheckConstraint("type IN ('HOLD_ORDER', 'HOLD_SHIPMENT', 'CREATE_PICKING_TASK', 'REQUEST_REINSPECTION', 'ESCALATE_TO_HUMAN')"),)
+    __table_args__ = (CheckConstraint("type IN ('HOLD_ORDER', 'HOLD_SHIPMENT', 'CREATE_PICKING_TASK', 'CREATE_REMOVAL_TASK', 'REQUEST_REINSPECTION', 'ESCALATE_TO_HUMAN')"),)
     id: Mapped[str] = mapped_column(String, primary_key=True, default=identifier)
     inspection_id: Mapped[str] = mapped_column(ForeignKey("inspections.id"))
     product_id: Mapped[str | None] = mapped_column(ForeignKey("products.id"), nullable=True)
@@ -157,6 +167,21 @@ class CorrectiveAction(Base):
 
 class PickingTask(Base):
     __tablename__ = "picking_tasks"
+    __table_args__ = (CheckConstraint("quantity > 0"),)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=identifier)
+    action_id: Mapped[str] = mapped_column(ForeignKey("corrective_actions.id"), unique=True)
+    approval_id: Mapped[str] = mapped_column(ForeignKey("approvals.id"))
+    order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"))
+    order_reference: Mapped[str] = mapped_column(String)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"))
+    product_reference: Mapped[str] = mapped_column(String)
+    quantity: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String, default="OPEN")
+    created_at: Mapped[str] = mapped_column(String, default=timestamp)
+
+
+class RemovalTask(Base):
+    __tablename__ = "removal_tasks"
     __table_args__ = (CheckConstraint("quantity > 0"),)
     id: Mapped[str] = mapped_column(String, primary_key=True, default=identifier)
     action_id: Mapped[str] = mapped_column(ForeignKey("corrective_actions.id"), unique=True)

@@ -32,7 +32,7 @@ import {
   operationKeys,
 } from "../lib/operations";
 import { comparisonValue } from "../lib/evidence";
-import type { Action, Audit, Inspection, Order } from "../types";
+import type { Action, Audit, Inspection, Order, VerificationStatus } from "../types";
 
 function Badge({ value }: { value: string }) {
   return (
@@ -165,7 +165,7 @@ export function RecordedTimeline({
 }
 
 function invalidateOperations(qc: ReturnType<typeof useQueryClient>) {
-  for (const key of ["inspections", "inspection", "audit", "orders", "summary"])
+  for (const key of ["inspections", "inspection", "audit", "orders", "summary", "verification-status"])
     qc.invalidateQueries({ queryKey: [key] });
 }
 
@@ -200,6 +200,12 @@ export function InvestigationCard({
   });
   const status =
     i.investigation_status ?? (i.investigation ? "COMPLETED" : "NOT_STARTED");
+  const verification = useQuery({
+    queryKey: ["verification-status", i.order_id, i.id],
+    queryFn: () => api<VerificationStatus>(`/orders/${i.order_id}/verification-status`,
+      { headers: { Authorization: `Bearer ${token}` } }),
+    enabled: !!token && isCurrent,
+  });
   const running = status === "RUNNING" || inFlight;
   const result = i.investigation_result;
   const summary = result?.summary ?? i.investigation;
@@ -228,6 +234,19 @@ export function InvestigationCard({
         <Badge value={i.status} />
         {i.reconciliation_status && <Badge value={i.reconciliation_status} />}
       </div>
+      {!!i.discrepancies.length && <div className="investigation-context">
+        <span>Detected issues</span>
+        <strong>{[...new Set(i.discrepancies.map((item) => label(item.type)))].join(", ")}</strong>
+      </div>}
+      {verification.data && <div className="investigation-context">
+        <span>Verification eligibility</span>
+        <Badge value={verification.data.verification_status} />
+        <span>Shipping: {label(verification.data.shipping_status)}</span>
+        <span>Open physical tasks: {[...verification.data.picking_tasks, ...verification.data.removal_tasks]
+          .filter((task) => task.status !== "COMPLETED").length}</span>
+        <span>{verification.data.requires_reinspection ? "New evidence required" : "No reinspection pending"}</span>
+        <span>{verification.data.revision_current ? "Current order revision" : "Order revision changed"}</span>
+      </div>}
       {result?.decision && (
         <div className="investigation-decision">
           <span>Persisted decision</span>
@@ -432,6 +451,27 @@ export function CorrectiveActionCard({
     },
     onSettled: () => invalidateOperations(qc),
   });
+  const taskId = typeof a.execution_details?.task_id === "string" ? a.execution_details.task_id : null;
+  const physicalKind = a.type === "CREATE_PICKING_TASK" ? "picking" :
+    a.type === "CREATE_REMOVAL_TASK" ? "removal" : null;
+  const physical = useQuery({
+    queryKey: ["verification-status", order?.id, a.id],
+    queryFn: () => api<VerificationStatus>(`/orders/${order?.id}/verification-status`,
+      { headers: { Authorization: `Bearer ${token}` } }),
+    enabled: !!token && !!order?.id && !!taskId && !!physicalKind,
+  });
+  const physicalTask = physicalKind === "picking" ?
+    physical.data?.picking_tasks.find((task) => task.id === taskId) :
+    physical.data?.removal_tasks.find((task) => task.id === taskId);
+  const completePhysical = useMutation({
+    mutationKey: ["physical-task", taskId],
+    mutationFn: () => api<{status: string}>(`/${physicalKind}-tasks/${taskId}/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ idempotency_key: operationKeys.get(taskId ?? "", "complete") }),
+    }),
+    onSettled: () => invalidateOperations(qc),
+  });
   const controls = actionControls(a);
   const lifecycle = a.lifecycle_state ?? a.status;
   const stale =
@@ -633,6 +673,21 @@ export function CorrectiveActionCard({
           <pre>{JSON.stringify(a.execution_details, null, 2)}</pre>
         </details>
       )}
+      {physicalKind && taskId && <div className="action-reinspection">
+        <div>
+          <strong>{physicalKind === "picking" ? "Picking" : "Removal"} task</strong>
+          <p>Recorded physical status: {physicalTask ? label(physicalTask.status) : "Loading"}.
+            Completion is an operator report; a new photo is still required.</p>
+          {Array.isArray(a.execution_details?.required_product_review_ids) &&
+            a.execution_details.required_product_review_ids.length > 0 && <p>
+              Review required products before replacement: {a.execution_details.required_product_review_ids.join(", ")}.
+              Their absence was not established by the photo.</p>}
+          {physicalTask?.status === "OPEN" && <Button size="sm"
+            disabled={!token || completePhysical.isPending}
+            onClick={() => completePhysical.mutate()}>Report physical completion</Button>}
+          {completePhysical.isError && <p role="alert" className="field-error">{completePhysical.error.message}</p>}
+        </div>
+      </div>}
       {["EXECUTED", "AWAITING_REINSPECTION"].includes(lifecycle) ||
       a.status === "EXECUTED" ? (
         <div className="action-reinspection">

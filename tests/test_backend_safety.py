@@ -232,6 +232,13 @@ class BackendSafetyTests(unittest.TestCase):
         self.assertEqual(executed.status_code, 200)
         self.assertEqual(executed.json()["status"], "EXECUTED")
         self.assertEqual(executed.json()["execution_details"]["status"], "OPEN")
+        picking_id = executed.json()["execution_details"]["task_id"]
+        completion = f"/api/picking-tasks/{picking_id}/complete"
+        completion_body = {"idempotency_key": "physical-pick-report-12345678"}
+        self.assertEqual(self.client.post(completion, json=completion_body).status_code, 403)
+        self.assertEqual(self.client.post(completion, json=completion_body, headers=self.auth).status_code, 200)
+        self.assertEqual(self.client.post(completion, json=completion_body, headers=self.auth).status_code, 200)
+        self.assertEqual(self.client.get("/api/orders/order-1001").json()["shipping_status"], "HELD")
         self.assertTrue(executed.json()["execution_details"]["reinspection_required"])
         with self.app.state.sessions() as db:
             inventory = db.scalar(select(Inventory).where(Inventory.product_id == "product-red"))
@@ -318,7 +325,8 @@ class BackendSafetyTests(unittest.TestCase):
             self.assertEqual(order.status, "NEEDS_REVIEW")
         self.assertEqual(len(requests), 5)
         self.assertEqual({tool["function"]["name"] for tool in requests[0]["tools"]},
-            {"get_order_details", "get_inspection_results", "check_inventory", "get_pending_actions", "get_order_history"})
+            {"get_order_details", "get_inspection_results", "check_inventory", "get_pending_actions",
+             "get_order_history", "get_verification_history"})
         self.assertEqual(requests[0]["tool_choice"], "auto")
         tool_results = {message["tool_call_id"]: json.loads(message["content"])
                         for message in requests[-1]["messages"] if message["role"] == "tool"}

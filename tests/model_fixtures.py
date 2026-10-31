@@ -30,3 +30,14 @@ def grounded_visual_result(red_quantity=2, *, certain=True):
             "sam": {"ok": True, "model": "sam-3.1", "latency_ms": 1, "boxes": boxes,
                     "masks": [], "diagnostics": [], "annotated_image": None},
             "observations": observations, "regions": regions}
+
+
+def grounded_wrong_product_result(red_quantity=2):
+    """Explicit mock: two required red units and one separately identified extra amber unit."""
+    result = grounded_visual_result(red_quantity)
+    for row in (result["observations"][-1], result["muse"]["observations"][-1]):
+        row.update(product_id="product-amber", label_text="PS-AMBER-03",
+                   evidence="Mock fixture: one separately labeled amber unit.")
+    result["observations"][-1]["sku"] = "PS-AMBER-03"
+    result["regions"][-1].update(product_id="product-amber", candidate_product_id="product-amber")
+    return result

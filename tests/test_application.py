@@ -57,6 +57,29 @@ class ApplicationTests(unittest.TestCase):
         dashboard = self.client.get("/api/dashboard/summary").json()
         self.assertEqual(dashboard["verified_orders"], 0)
         self.assertEqual(dashboard["recent_inspections"], [])
+        self.assertEqual(dashboard["orders_on_hold"], 0)
+        self.assertEqual(dashboard["pending_human_reviews"], 0)
+        self.assertEqual(dashboard["attention_required"], [])
+
+    def test_dashboard_attention_comes_from_current_inspection_records(self):
+        inspection = self.upload().json()
+        self.run_model(inspection["id"], quantity=1)
+        dashboard = self.client.get("/api/dashboard/summary").json()
+        self.assertEqual(dashboard["orders_on_hold"], 1)
+        self.assertEqual(dashboard["active_discrepancies"], 1)
+        self.assertEqual(dashboard["attention_required"][0]["inspection_id"], inspection["id"])
+        self.assertEqual(dashboard["attention_required"][0]["order_id"], "order-1001")
+
+    def test_demo_assets_are_real_allowlisted_synthetic_files(self):
+        assets = self.client.get("/api/demo/assets")
+        self.assertEqual(assets.status_code, 200)
+        self.assertTrue(any(row["name"] == "missing" for row in assets.json()))
+        for row in assets.json():
+            self.assertEqual(row["provenance"], "original_synthetic_fixture")
+            image = self.client.get(row["url"])
+            self.assertEqual(image.status_code, 200)
+            self.assertTrue(image.content.startswith(b"\x89PNG"))
+        self.assertEqual(self.client.get("/api/demo/assets/unknown").status_code, 404)
 
     def test_order_details_use_database_products(self):
         order = self.client.get("/api/orders/order-1001").json()

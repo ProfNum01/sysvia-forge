@@ -12,3 +12,4 @@ frontend/dist/
 *.tsbuildinfo
 .pytest_cache/
 .playwright/
+docs/hackathon-contributions.md

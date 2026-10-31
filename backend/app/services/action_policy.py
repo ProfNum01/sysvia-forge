@@ -4,7 +4,7 @@ from sqlalchemy import select
 from backend.app.models.database import AuditEvent, CorrectiveAction, Inspection, Inventory
 from backend.app.services.inventory import available_quantity
 
-ACTION_TYPES = {"HOLD_SHIPMENT", "CREATE_PICKING_TASK", "REQUEST_REINSPECTION", "ESCALATE_TO_HUMAN"}
+ACTION_TYPES = {"HOLD_SHIPMENT", "CREATE_PICKING_TASK", "CREATE_REMOVAL_TASK", "REQUEST_REINSPECTION", "ESCALATE_TO_HUMAN"}
 UNSAFE_PICKING = {"NOT_OBSERVED", "UNCERTAIN", "UNIDENTIFIED", "GEOMETRY_UNCONFIRMED", "UNCLAIMED_GEOMETRY"}
 
 
@@ -14,6 +14,10 @@ def evidence_references(db, inspection, order):
     references.update(f"region:{row['id']}" for row in inspection.regions)
     references.update(f"inventory:{line.product_id}" for line in order.items if db.scalar(
         select(Inventory.id).where(Inventory.product_id == line.product_id)))
+    inspection_rows = list(db.scalars(select(Inspection).where(Inspection.order_id == order.id)
+        .order_by(Inspection.created_at.desc(), Inspection.id.desc()).limit(20)))
+    references.update(f"inspection:{row.id}" for row in inspection_rows)
+    references.update(f"photo:{row.photo_id}" for row in inspection_rows)
     inspection_ids = select(Inspection.id).where(Inspection.order_id == order.id)
     action_ids = list(db.scalars(select(CorrectiveAction.id).where(CorrectiveAction.inspection_id.in_(inspection_ids))))
     references.update(f"action:{identifier}" for identifier in action_ids)
@@ -44,6 +48,28 @@ def supported_shortfall(db, inspection, product_id, quantity):
     return (len(ids) == len(set(ids)) and sum(row.quantity for row in observations) == discrepancy.observed_quantity
             and quantity == discrepancy.required_quantity - discrepancy.observed_quantity
             and available_quantity(db, product_id) >= quantity)
+
+
+def supported_excess(inspection, product_id, quantity):
+    """Require distinct, product-grounded regions for every unit to remove."""
+    if type(quantity) is not int or quantity <= 0:
+        return False
+    discrepancy = next((row for row in inspection.discrepancies if row.type in {"EXCESS", "EXTRA_PRODUCT"}
+                        and row.product_id == product_id and row.status == "OPEN"), None)
+    if (discrepancy is None or discrepancy.observed_quantity is None
+            or discrepancy.required_quantity is None
+            or quantity != discrepancy.observed_quantity - discrepancy.required_quantity):
+        return False
+    observations = [row for row in inspection.observations if row.product_id == product_id]
+    regions = {row["id"]: row for row in inspection.regions}
+    if (not observations or any(row.identification_status != "MATCHED" or not row.count_certain
+            or not row.identity_certain or not row.evidence_region_ids or row.quantity is None
+            or row.quantity != len(row.evidence_region_ids)
+            or any(rid not in regions or regions[rid].get("product_id") != product_id
+                   for rid in row.evidence_region_ids) for row in observations)):
+        return False
+    ids = [rid for row in observations for rid in row.evidence_region_ids]
+    return len(ids) == len(set(ids)) and sum(row.quantity for row in observations) == discrepancy.observed_quantity
 
 
 def validate_recommendations(db, inspection, order, result):
@@ -124,6 +150,21 @@ def validate_recommendations(db, inspection, order, result):
                 CorrectiveAction.status.not_in(["REJECTED", "FAILED"])).limit(1))
             if pending:
                 raise ValueError("duplicate_picking")
+        elif action["type"] == "CREATE_REMOVAL_TASK":
+            discrepancy = next((row for row in inspection.discrepancies if row.type in {"EXCESS", "EXTRA_PRODUCT"}
+                                and row.product_id == product_id and row.status == "OPEN"), None)
+            product_regions = {rid for row in inspection.observations if row.product_id == product_id
+                               and row.identification_status == "MATCHED" for rid in row.evidence_region_ids}
+            if (not supported_excess(inspection, product_id, quantity) or discrepancy is None
+                    or result["decision"] != "CORRECTIVE_ACTION_REQUIRED"
+                    or f"discrepancy:{discrepancy.id}" not in action_refs
+                    or not any(f"region:{rid}" in action_refs for rid in product_regions)):
+                raise ValueError("unsupported_removal")
+            pending = db.scalar(select(CorrectiveAction.id).join(Inspection).where(Inspection.order_id == order.id,
+                CorrectiveAction.type == "CREATE_REMOVAL_TASK", CorrectiveAction.product_id == product_id,
+                CorrectiveAction.status.not_in(["REJECTED", "FAILED"])).limit(1))
+            if pending:
+                raise ValueError("duplicate_removal")
         elif product_id is not None or quantity is not None:
             raise ValueError("unexpected_action_parameters")
         key = (action["type"], product_id)

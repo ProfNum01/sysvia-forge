@@ -18,7 +18,7 @@ from backend.app.main import create_app
 from backend.app.core.config import Settings
 from backend.app.models.database import Approval, CorrectiveAction, Inspection, Inventory, AuditEvent, PickingTask
 from backend.app.services.seed import seed_demo
-from model_fixtures import grounded_visual_result
+from model_fixtures import grounded_visual_result, grounded_wrong_product_result
 
 
 class ActionEngineTests(unittest.TestCase):
@@ -76,6 +76,10 @@ class ActionEngineTests(unittest.TestCase):
         self.assertEqual(task["status"], "PENDING_APPROVAL")
         self.assertEqual(self.client.post(f"/api/actions/{task['id']}/execute", headers=self.auth,
             json={"idempotency_key": "unapproved-task-123"}).status_code, 409)
+        output = io.BytesIO()
+        Image.new("RGB", (32, 32), "blue").save(output, "PNG")
+        self.assertEqual(self.client.post(f"/api/inspections/{inspection['id']}/reinspect", headers=self.auth,
+            data={"rights_confirmed": "true"}, files={"image": ("new.png", output.getvalue(), "image/png")}).status_code, 409)
 
     def test_invalid_model_product_quantity_or_uncertainty_cannot_create_picking(self):
         inspection = self.inspection()
@@ -244,10 +248,129 @@ class ActionEngineTests(unittest.TestCase):
             self.assertEqual(action["execution_details"]["resolved_by_photo_id"], replacement.json()["photo_id"])
             self.assertEqual(action["execution_details"]["previous_photo_id"], inspection["photo_id"])
             self.assertFalse(action["execution_details"]["reinspection_required"])
+
+    def test_completed_pick_and_new_photo_can_verify_after_all_approvals(self):
+        inspection = self.inspection()
+        response = self.investigate(inspection, self.proposal(inspection))
+        self.assertEqual(response.status_code, 200)
+        actions = response.json()["actions"]
+        for action in actions:
+            action_id = action["id"]
+            self.assertEqual(self.client.post(f"/api/actions/{action_id}/approve", headers=self.auth,
+                json={"idempotency_key": f"approve-cycle-{action_id}"}).status_code, 200)
+            executed = self.client.post(f"/api/actions/{action_id}/execute", headers=self.auth,
+                json={"idempotency_key": f"execute-cycle-{action_id}"})
+            self.assertEqual(executed.status_code, 200)
+            if action["type"] == "CREATE_PICKING_TASK":
+                task_id = executed.json()["execution_details"]["task_id"]
+                self.assertEqual(self.client.post(f"/api/picking-tasks/{task_id}/complete", headers=self.auth,
+                    json={"idempotency_key": "complete-cycle-pick"}).status_code, 200)
+        output = io.BytesIO()
+        Image.new("RGB", (32, 32), "blue").save(output, "PNG")
+        replacement = self.client.post(f"/api/inspections/{inspection['id']}/reinspect", headers=self.auth,
+            data={"rights_confirmed": "true"}, files={"image": ("new.png", output.getvalue(), "image/png")})
+        self.assertEqual(replacement.status_code, 201)
+        with patch("backend.app.api.routes.run_visual_models", return_value=grounded_visual_result()):
+            verified = self.client.post(f"/api/inspections/{replacement.json()['id']}/analyze", headers=self.auth)
+        self.assertEqual(verified.status_code, 200)
+        self.assertEqual(verified.json()["status"], "VERIFIED")
+        self.assertEqual(verified.json()["order_version"], inspection["order_version"])
+        order = self.client.get("/api/orders/order-1001").json()
+        self.assertEqual(order["shipping_status"], "NOT_READY")
+        self.assertFalse(order["requires_reinspection"])
         ready = self.client.post("/api/orders/order-1001/shipping-transition", headers=self.auth,
             json={"idempotency_key": "verified-ready-123", "target": "READY_TO_SHIP"})
         self.assertEqual(ready.status_code, 200)
         self.assertEqual(ready.json()["shipping_status"], "READY_TO_SHIP")
+
+    def test_supported_excess_creates_approved_removal_task_and_needs_new_photo(self):
+        inspection = self.inspection()
+        output = io.BytesIO()
+        Image.new("RGB", (32, 32), "green").save(output, "PNG")
+        newer = self.client.post(f"/api/inspections/{inspection['id']}/reinspect", headers=self.auth,
+            data={"rights_confirmed": "true"}, files={"image": ("extra.png", output.getvalue(), "image/png")}).json()
+        with patch("backend.app.api.routes.run_visual_models", return_value=grounded_visual_result(3)):
+            excess = self.client.post(f"/api/inspections/{newer['id']}/analyze", headers=self.auth).json()
+        proposal = self.proposal(excess, action_type="CREATE_REMOVAL_TASK")
+        response = self.investigate(excess, proposal)
+        self.assertEqual(response.status_code, 200)
+        action = next(row for row in response.json()["actions"] if row["type"] == "CREATE_REMOVAL_TASK")
+        self.assertEqual(self.client.post(f"/api/actions/{action['id']}/execute", headers=self.auth,
+            json={"idempotency_key": "remove-without-approval"}).status_code, 409)
+        self.assertEqual(self.client.post(f"/api/actions/{action['id']}/approve", headers=self.auth,
+            json={"idempotency_key": "approve-remove-1234"}).status_code, 200)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            calls = [executor.submit(self.client.post, f"/api/actions/{action['id']}/execute",
+                headers=self.auth, json={"idempotency_key": "execute-remove-1234"}) for _ in range(2)]
+            executions = [call.result(timeout=10) for call in calls]
+        self.assertEqual([row.status_code for row in executions], [200, 200])
+        executed = executions[0]
+        task_id = executed.json()["execution_details"]["task_id"]
+        correction = io.BytesIO()
+        Image.new("RGB", (32, 32), "purple").save(correction, "PNG")
+        blocked = self.client.post(f"/api/inspections/{excess['id']}/reinspect", headers=self.auth,
+            data={"rights_confirmed": "true"}, files={"image": ("new.png", correction.getvalue(), "image/png")})
+        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(self.client.post(f"/api/removal-tasks/{task_id}/complete", headers=self.auth,
+            json={"idempotency_key": "complete-remove-1234"}).status_code, 200)
+        self.assertEqual(self.client.get("/api/orders/order-1001").json()["shipping_status"], "HELD")
+        corrected = self.client.post(f"/api/inspections/{excess['id']}/reinspect", headers=self.auth,
+            data={"rights_confirmed": "true"}, files={"image": ("new.png", correction.getvalue(), "image/png")})
+        self.assertEqual(corrected.status_code, 201)
+        with patch("backend.app.api.routes.run_visual_models", return_value=grounded_visual_result()):
+            verified = self.client.post(f"/api/inspections/{corrected.json()['id']}/analyze", headers=self.auth)
+        self.assertEqual(verified.json()["status"], "VERIFIED")
+        self.assertEqual(self.client.get("/api/orders/order-1001").json()["shipping_status"], "NOT_READY")
+
+    def test_wrong_product_allows_grounded_removal_but_not_guessed_picking(self):
+        output = io.BytesIO()
+        Image.new("RGB", (32, 32), "white").save(output, "PNG")
+        uploaded = self.client.post("/api/inspections", headers=self.auth,
+            data={"order_id": "order-1001", "rights_confirmed": "true"},
+            files={"image": ("wrong.png", output.getvalue(), "image/png")}).json()
+        with patch("backend.app.api.routes.run_visual_models", return_value=grounded_wrong_product_result()):
+            wrong = self.client.post(f"/api/inspections/{uploaded['id']}/analyze", headers=self.auth).json()
+        self.assertIn("NOT_OBSERVED", {row["type"] for row in wrong["discrepancies"]})
+        self.assertIn("EXTRA_PRODUCT", {row["type"] for row in wrong["discrepancies"]})
+        picking = self.proposal(wrong, action_type="CREATE_PICKING_TASK", product_id="product-blue")
+        self.assertEqual(self.investigate(wrong, picking).status_code, 422)
+        oversized = self.proposal(wrong, action_type="CREATE_REMOVAL_TASK", product_id="product-amber", quantity=2)
+        self.assertEqual(self.investigate(wrong, oversized).status_code, 422)
+        invented = self.proposal(wrong, action_type="CREATE_REMOVAL_TASK", product_id="product-invented")
+        self.assertEqual(self.investigate(wrong, invented).status_code, 422)
+        removal = self.proposal(wrong, action_type="CREATE_REMOVAL_TASK", product_id="product-amber")
+        accepted = self.investigate(wrong, removal)
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(len([row for row in accepted.json()["actions"] if row["type"] == "CREATE_REMOVAL_TASK"]), 1)
+        replay = self.investigate(wrong, removal)
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(len([row for row in replay.json()["actions"] if row["type"] == "CREATE_REMOVAL_TASK"]), 1)
+        action = next(row for row in accepted.json()["actions"] if row["type"] == "CREATE_REMOVAL_TASK")
+        self.assertEqual(self.client.post(f"/api/actions/{action['id']}/approve", headers=self.auth,
+            json={"idempotency_key": "approve-wrong-remove-1234"}).status_code, 200)
+        executed = self.client.post(f"/api/actions/{action['id']}/execute", headers=self.auth,
+            json={"idempotency_key": "execute-wrong-remove-1234"})
+        self.assertEqual(executed.status_code, 200)
+        self.assertEqual(executed.json()["execution_details"]["required_product_review_ids"], ["product-blue"])
+        self.assertEqual(executed.json()["execution_details"]["replacement_decision"], "OPERATOR_MUST_CONFIRM")
+
+    def test_multiple_supported_excesses_get_distinct_validated_removal_proposals(self):
+        output = io.BytesIO()
+        Image.new("RGB", (32, 32), "white").save(output, "PNG")
+        uploaded = self.client.post("/api/inspections", headers=self.auth,
+            data={"order_id": "order-1001", "rights_confirmed": "true"},
+            files={"image": ("multi.png", output.getvalue(), "image/png")}).json()
+        with patch("backend.app.api.routes.run_visual_models", return_value=grounded_wrong_product_result(3)):
+            inspected = self.client.post(f"/api/inspections/{uploaded['id']}/analyze", headers=self.auth).json()
+        self.assertEqual({row["type"] for row in inspected["discrepancies"]},
+                         {"EXCESS", "EXTRA_PRODUCT", "NOT_OBSERVED"})
+        proposal = self.proposal(inspected, action_type="CREATE_REMOVAL_TASK", product_id="product-red")
+        proposal.recommended_actions.append({"type": "CREATE_REMOVAL_TASK", "product_id": "product-amber",
+            "quantity": 1, "requires_approval": True, "evidence_references": proposal.evidence_references})
+        response = self.investigate(inspected, proposal)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual({row["product_id"] for row in response.json()["actions"]
+                          if row["type"] == "CREATE_REMOVAL_TASK"}, {"product-red", "product-amber"})
 
     def test_timeout_is_persisted_and_explicit_retry_reuses_investigation_id(self):
         inspection = self.inspection()

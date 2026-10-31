@@ -91,6 +91,8 @@ class ItemOut(FromORM):
 
 class OrderOut(FromORM):
     id: str
+    requirements_revision: str
+    version: int
     reference: str
     customer: str
     status: str
@@ -144,6 +146,8 @@ class ActionOut(FromORM):
 
 class InspectionOut(FromORM):
     id: str
+    requirements_revision: str | None
+    order_version: int | None
     order_id: str
     status: str
     photo_id: str
@@ -216,6 +220,9 @@ class DashboardOut(BaseModel):
     pending_inspections: int
     verified_orders: int
     active_discrepancies: int
+    orders_on_hold: int
+    pending_human_reviews: int
+    attention_required: list[dict[str, Any]]
     order_status_distribution: list[dict]
     recent_inspections: list[InspectionOut]
     agent_activity: list[AuditOut]

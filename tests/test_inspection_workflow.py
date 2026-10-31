@@ -162,6 +162,87 @@ class InspectionWorkflowTests(unittest.TestCase):
         self.assertEqual((red["observed_quantity"], red["difference"], red["status"]), (3, 1, "EXCESS"))
         self.assertEqual(excess.json()["reconciliation_status"], "MISMATCH_DETECTED")
 
+    def test_new_evidence_supersedes_automatic_hold_proposal(self):
+        first = self.upload().json()
+        self.assertEqual(self.analyze(first["id"], grounded_visual_result(red_quantity=1)).status_code, 200)
+        newer = self.upload(parent=first["id"], color="blue").json()
+        result = self.analyze(newer["id"], grounded_visual_result())
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["status"], "VERIFIED")
+        self.assertEqual(result.json()["reconciliation_status"], "VERIFIED")
+        self.assertEqual(self.client.get("/api/orders/order-1001").json()["shipping_status"], "NOT_READY")
+        original = self.client.get(f"/api/inspections/{first['id']}").json()
+        self.assertEqual(original["resolved_by_inspection_id"], newer["id"])
+        self.assertEqual(original["actions"][0]["status"], "SUPERSEDED")
+
+    def test_verification_reads_preserve_before_and_after_evidence(self):
+        first = self.upload().json()
+        self.analyze(first["id"], grounded_visual_result(red_quantity=1))
+        newer = self.upload(parent=first["id"], color="blue").json()
+        self.analyze(newer["id"], grounded_visual_result())
+        evidence = self.client.get(f"/api/inspections/{newer['id']}/evidence", headers=self.auth)
+        self.assertEqual(evidence.status_code, 200)
+        self.assertEqual([row["photo_id"] for row in evidence.json()], [first["photo_id"], newer["photo_id"]])
+        comparison = self.client.get(f"/api/inspections/{newer['id']}/comparison", headers=self.auth)
+        self.assertEqual(comparison.status_code, 200)
+        self.assertEqual(comparison.json()["before"]["id"], first["id"])
+        self.assertEqual(comparison.json()["after"]["id"], newer["id"])
+        status = self.client.get("/api/orders/order-1001/verification-status", headers=self.auth)
+        self.assertEqual(status.json()["verification_status"], "VERIFIED")
+        self.assertEqual(self.client.get("/api/orders/order-1001/verification-history", headers=self.auth).status_code, 200)
+        self.assertEqual(self.client.get(f"/api/inspections/{newer['id']}/evidence").status_code, 403)
+
+    def test_changed_requirements_cannot_verify_stale_uploaded_evidence(self):
+        from backend.app.models.database import OrderItem
+        inspection = self.upload().json()
+        original_revision = inspection["requirements_revision"]
+        original_version = inspection["order_version"]
+        with self.app.state.sessions() as db:
+            line = db.get(OrderItem, "item-1001-1")
+            line.quantity += 1
+            db.commit()
+        order = self.client.get("/api/orders/order-1001").json()
+        self.assertNotEqual(order["requirements_revision"], original_revision)
+        self.assertGreater(order["version"], original_version)
+        self.assertEqual(self.analyze(inspection["id"], grounded_visual_result()).status_code, 409)
+        self.assertEqual(self.client.get("/api/orders/order-1001/verification-status", headers=self.auth).json()["revision_current"], False)
+
+    def test_requirement_change_after_verification_blocks_shipping(self):
+        from backend.app.models.database import OrderItem
+        inspection = self.upload().json()
+        self.assertEqual(self.analyze(inspection["id"], grounded_visual_result()).json()["status"], "VERIFIED")
+        with self.app.state.sessions() as db:
+            db.get(OrderItem, "item-1001-1").quantity += 1
+            db.commit()
+        response = self.client.post("/api/orders/order-1001/shipping-transition", headers=self.auth,
+            json={"target": "READY_TO_SHIP", "idempotency_key": "stale-shipping-1234"})
+        self.assertEqual(response.status_code, 409)
+
+    def test_requirement_change_during_provider_call_cannot_commit_verification(self):
+        from backend.app.models.database import OrderItem
+        inspection = self.upload().json()
+        def changed_requirements(*args, **kwargs):
+            with self.app.state.sessions() as db:
+                db.get(OrderItem, "item-1001-1").quantity += 1
+                db.commit()
+            return grounded_visual_result()
+        with patch("backend.app.api.routes.run_visual_models", side_effect=changed_requirements):
+            response = self.client.post(f"/api/inspections/{inspection['id']}/analyze", headers=self.auth)
+        self.assertEqual(response.status_code, 409)
+        self.assertNotEqual(self.client.get("/api/orders/order-1001").json()["status"], "VERIFIED")
+
+    def test_stale_order_rejects_corrective_approval(self):
+        from backend.app.models.database import OrderItem
+        inspection = self.upload().json()
+        analyzed = self.analyze(inspection["id"], grounded_visual_result(red_quantity=1)).json()
+        action = analyzed["actions"][0]
+        with self.app.state.sessions() as db:
+            db.get(OrderItem, "item-1001-1").quantity += 1
+            db.commit()
+        response = self.client.post(f"/api/actions/{action['id']}/approve", headers=self.auth,
+            json={"idempotency_key": "stale-approval-1234"})
+        self.assertEqual(response.status_code, 409)
+
     def test_unobserved_product_remains_unknown_in_persisted_comparison(self):
         result = grounded_visual_result()
         result["observations"] = result["observations"][:2]

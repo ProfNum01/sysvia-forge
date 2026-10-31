@@ -3,6 +3,7 @@ const supportedTypes = new Set([
   "HOLD_SHIPMENT",
   "HOLD_ORDER",
   "CREATE_PICKING_TASK",
+  "CREATE_REMOVAL_TASK",
   "REQUEST_REINSPECTION",
   "ESCALATE_TO_HUMAN",
 ]);
@@ -33,6 +34,8 @@ export function actionImpact(type: string): string {
       return "Prevents this order from advancing to shipping through ProofSight.";
     case "CREATE_PICKING_TASK":
       return "Creates a local picking task. Inventory is not deducted, and physical completion is not assumed.";
+    case "CREATE_REMOVAL_TASK":
+      return "Creates a local removal task for supported excess units. Inventory is not deducted, and physical completion is not assumed.";
     case "REQUEST_REINSPECTION":
       return "Requires new visual evidence. The request does not verify the order.";
     case "ESCALATE_TO_HUMAN":

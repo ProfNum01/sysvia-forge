@@ -6,6 +6,8 @@ from sqlalchemy.schema import CreateTable
 def upgrade_local_schema(engine):
     columns = {
         "inspections": {
+            "requirements_revision": "VARCHAR(64)",
+            "order_version": "INTEGER",
             "image_width": "INTEGER NOT NULL DEFAULT 0", "image_height": "INTEGER NOT NULL DEFAULT 0",
             "creation_key": "VARCHAR",
             "processing_stage": "VARCHAR NOT NULL DEFAULT 'HISTORICAL_RECORD'",
@@ -20,7 +22,8 @@ def upgrade_local_schema(engine):
             "sku": "VARCHAR", "identification_status": "VARCHAR NOT NULL DEFAULT 'UNCERTAIN'",
             "evidence_region_ids": "JSON NOT NULL DEFAULT '[]'",
         },
-        "orders": {"shipping_status": "VARCHAR NOT NULL DEFAULT 'NOT_READY'",
+        "orders": {"version": "INTEGER NOT NULL DEFAULT 1",
+                   "shipping_status": "VARCHAR NOT NULL DEFAULT 'NOT_READY'",
                    "requires_reinspection": "BOOLEAN NOT NULL DEFAULT 0"},
         "corrective_actions": {
             "investigation_id": "VARCHAR", "evidence_references": "JSON NOT NULL DEFAULT '[]'",
@@ -41,6 +44,28 @@ def upgrade_local_schema(engine):
             connection.exec_driver_sql(f'CREATE UNIQUE INDEX IF NOT EXISTS ix_inspections_{column} ON inspections ({column})')
         connection.exec_driver_sql("UPDATE corrective_actions SET lifecycle_state = CASE WHEN status = 'EXECUTED' THEN 'AWAITING_REINSPECTION' ELSE status END WHERE lifecycle_state = 'PROPOSED' AND status <> 'PROPOSED'")
         connection.exec_driver_sql("UPDATE orders SET shipping_status='HELD', requires_reinspection=1 WHERE status='HELD'")
+        if engine.dialect.name == "sqlite":
+            for operation, order_id in (("INSERT", "NEW.order_id"), ("UPDATE", "NEW.order_id"),
+                                        ("DELETE", "OLD.order_id")):
+                connection.exec_driver_sql(f"""CREATE TRIGGER IF NOT EXISTS order_items_revision_{operation.lower()}
+                    AFTER {operation} ON order_items BEGIN
+                    UPDATE orders SET version=version+1,
+                        status=CASE WHEN latest_inspection_id IS NOT NULL THEN 'HELD' ELSE status END,
+                        shipping_status=CASE WHEN latest_inspection_id IS NOT NULL THEN 'HELD' ELSE shipping_status END,
+                        requires_reinspection=CASE WHEN latest_inspection_id IS NOT NULL THEN 1 ELSE requires_reinspection END
+                    WHERE id={order_id}; END""")
+            connection.exec_driver_sql("""CREATE TRIGGER IF NOT EXISTS order_items_revision_update_old_order
+                AFTER UPDATE OF order_id ON order_items WHEN OLD.order_id != NEW.order_id BEGIN
+                UPDATE orders SET version=version+1,
+                    status=CASE WHEN latest_inspection_id IS NOT NULL THEN 'HELD' ELSE status END,
+                    shipping_status=CASE WHEN latest_inspection_id IS NOT NULL THEN 'HELD' ELSE shipping_status END,
+                    requires_reinspection=CASE WHEN latest_inspection_id IS NOT NULL THEN 1 ELSE requires_reinspection END
+                WHERE id=OLD.order_id; END""")
+            connection.exec_driver_sql("""CREATE TRIGGER IF NOT EXISTS products_sku_revision_update
+                AFTER UPDATE OF sku ON products BEGIN
+                UPDATE orders SET version=version+1, status='HELD', shipping_status='HELD', requires_reinspection=1
+                WHERE latest_inspection_id IS NOT NULL AND id IN
+                    (SELECT order_id FROM order_items WHERE product_id=NEW.id); END""")
     if engine.dialect.name == "sqlite":
         _upgrade_action_constraint(engine)
 
@@ -52,7 +77,7 @@ def _upgrade_action_constraint(engine):
         definition = connection.exec_driver_sql(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='corrective_actions'").scalar_one()
         connection.commit()
-        if "HOLD_SHIPMENT" not in definition:
+        if "CREATE_REMOVAL_TASK" not in definition:
             connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
             connection.commit()
             try:
