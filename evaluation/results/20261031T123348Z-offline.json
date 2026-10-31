@@ -1,0 +1,119 @@
+{
+  "dataset_id": "original-synthetic-scenes-v1",
+  "mode": "OFFLINE_MANIFEST",
+  "created_at": "2026-10-31T12:33:48.921133+00:00",
+  "cases_available": 5,
+  "live_inspection_attempts": 0,
+  "metrics": {
+    "sample_size": 0,
+    "provenance_counts": {},
+    "false_verification_count": 0,
+    "false_verification_rate_percent": null,
+    "human_review_count": 0,
+    "human_review_rate_percent": null,
+    "unauthorized_execution_count": null,
+    "incorrect_verification_count": 0,
+    "successful_verification_count": 0,
+    "unresolved_discrepancy_count": 0,
+    "stale_order_rejection_count": null,
+    "shipping_safety_violation_count": 0,
+    "agent_sample_size": 0,
+    "valid_action_proposal_rate_percent": null,
+    "tool_execution_success_rate_percent": null,
+    "incorrect_action_proposal_count": 0,
+    "average_investigation_duration_seconds": null,
+    "product_identification_accuracy_percent": null,
+    "product_identification_accuracy_note": "No independent region-level SKU annotations; not measured.",
+    "quantity_agreement_sample_size": 0,
+    "quantity_agreement_percent": null,
+    "discrepancy_detection_sample_size": 0,
+    "uncertain_cases_excluded_from_detection_metrics": 0,
+    "discrepancy_detection_precision_percent": null,
+    "discrepancy_detection_recall_percent": null
+  },
+  "cases": [
+    {
+      "scenario_id": "correct-order",
+      "provenance": "SYNTHETIC",
+      "evidence": "data/fixtures/task002-correct.png",
+      "evidence_sha256": "1fb262f964bd6fa40a3fb3e71eec7c2586dd0c64f02da642045708b21cbd4ea6",
+      "ground_truth_quantities": {
+        "product-red": 2,
+        "product-blue": 1
+      },
+      "ground_truth_limitations": null,
+      "expected_discrepancy": [],
+      "expected_agent_behavior": "NO_INVESTIGATION",
+      "expected_verification_policy": "VERIFY_ONLY_WITH_SUFFICIENT_EVIDENCE",
+      "outcome": "NOT_RUN"
+    },
+    {
+      "scenario_id": "visible-shortfall",
+      "provenance": "SYNTHETIC",
+      "evidence": "data/fixtures/task002-missing.png",
+      "evidence_sha256": "f556bb091b36f6a2419a0e3c11cb3c510001a8fa0c4ef1e9692d0d33db427b23",
+      "ground_truth_quantities": {
+        "product-red": 1,
+        "product-blue": 1
+      },
+      "ground_truth_limitations": null,
+      "expected_discrepancy": [
+        "SHORTFALL_OR_REVIEW"
+      ],
+      "expected_agent_behavior": "PICK_IF_VISUALLY_SUPPORTED_AND_IN_STOCK_ELSE_REVIEW",
+      "expected_verification_policy": "BLOCK_UNTIL_NEW_EVIDENCE",
+      "outcome": "NOT_RUN"
+    },
+    {
+      "scenario_id": "additional-product",
+      "provenance": "SYNTHETIC",
+      "evidence": "data/fixtures/task002-extra.png",
+      "evidence_sha256": "5e815a31e78df2be2e01a4b1db8360b29d56ad72caeca96995f4a4186c989736",
+      "ground_truth_quantities": {
+        "product-red": 2,
+        "product-blue": 1,
+        "product-green": 1
+      },
+      "ground_truth_limitations": null,
+      "expected_discrepancy": [
+        "EXTRA_PRODUCT_OR_REVIEW"
+      ],
+      "expected_agent_behavior": "REMOVE_IF_VISUALLY_SUPPORTED_ELSE_REVIEW",
+      "expected_verification_policy": "BLOCK_UNTIL_NEW_EVIDENCE",
+      "outcome": "NOT_RUN"
+    },
+    {
+      "scenario_id": "unreadable-label",
+      "provenance": "SYNTHETIC",
+      "evidence": "data/fixtures/task002-ambiguous.png",
+      "evidence_sha256": "62821cec4f14a1dfc93b06b40614ca785a5233d64138f96fc4b70001e862d280",
+      "ground_truth_quantities": {
+        "product-blue": 1
+      },
+      "ground_truth_limitations": "The red-shaped item's SKU is deliberately unreadable; identity is unknown.",
+      "expected_discrepancy": [
+        "UNCERTAIN"
+      ],
+      "expected_agent_behavior": "REQUEST_REVIEW_OR_NEW_IMAGE",
+      "expected_verification_policy": "NEEDS_REVIEW",
+      "outcome": "NOT_RUN"
+    },
+    {
+      "scenario_id": "unidentified-object",
+      "provenance": "SYNTHETIC",
+      "evidence": "data/fixtures/task002-unidentified.png",
+      "evidence_sha256": "2abc88c61fbad16e12504f7e212c95dc5222909d52e6359637205d5e59e34cbf",
+      "ground_truth_quantities": {
+        "product-red": 1,
+        "product-blue": 1
+      },
+      "ground_truth_limitations": "The additional purple shape has no catalog identity.",
+      "expected_discrepancy": [
+        "UNIDENTIFIED"
+      ],
+      "expected_agent_behavior": "ESCALATE_OR_REQUEST_NEW_IMAGE",
+      "expected_verification_policy": "NEEDS_REVIEW",
+      "outcome": "NOT_RUN"
+    }
+  ]
+}

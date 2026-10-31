@@ -75,7 +75,8 @@ import {
   ProductComparison,
 } from "./components/inspection-evidence";
 import { DemoWorkspace } from "./components/demo-workspace";
-import { api, formatTime, label } from "./lib/api";
+import { api, formatTime, label, setApiOperatorToken } from "./lib/api";
+import { useProtectedImage } from "./lib/protected-image";
 import { validateImage } from "./lib/validation";
 import {
   buildInspectionUpload,
@@ -105,7 +106,33 @@ const TokenContext = createContext({
   setToken: (_value: string) => {},
 });
 function TokenProvider({ children }: { children: React.ReactNode }) {
-  const [token, setToken] = useState("");
+  const [token, saveToken] = useState(() => {
+    try {
+      const stored = typeof window !== "undefined" ? sessionStorage.getItem("proofsight_operator_token") || "" : "";
+      if (stored) {
+        setApiOperatorToken(stored);
+      }
+      return stored;
+    } catch {
+      return "";
+    }
+  });
+  const setToken = (value: string) => {
+    try {
+      if (typeof window !== "undefined") {
+        if (value) {
+          sessionStorage.setItem("proofsight_operator_token", value);
+        } else {
+          sessionStorage.removeItem("proofsight_operator_token");
+        }
+      }
+    } catch {
+      // sessionStorage unavailable
+    }
+    setApiOperatorToken(value);
+    queryClient.clear();
+    saveToken(value);
+  };
   return (
     <TokenContext.Provider value={{ token, setToken }}>
       {children}
@@ -1206,6 +1233,7 @@ function InspectionPage() {
                   <EvidenceViewer
                     key={current.id}
                     inspection={current}
+                    token={token}
                     products={
                       catalog.data ??
                       selected?.items.map((item) => item.product) ??
@@ -1478,11 +1506,7 @@ function InspectionResults({
           <details className="stored-annotation">
             <summary>View recorded SAM annotation</summary>
             <figure className="captured-evidence segmentation-figure">
-              <img
-                src={i.annotation_url}
-                alt={`SAM segmentation annotation for inspection ${i.id}`}
-                loading="lazy"
-              />
+              <ProtectedEvidenceImage path={i.annotation_url} alt={`SAM segmentation annotation for inspection ${i.id}`} />
               <figcaption className="form-hint">
                 Geometry highlights visual regions. Segmentation does not
                 independently establish product SKU or verify the order.
@@ -1595,8 +1619,20 @@ function InspectionResults({
     </>
   );
 }
+function ProtectedEvidenceImage({ path, alt }: { path?: string | null; alt: string }) {
+  const { token } = useContext(TokenContext);
+  const image = useProtectedImage(path, token);
+  if (!path) return <p role="status">No stored evidence image is available.</p>;
+  if (!token) return <p role="status">Set an operator token in Settings to view evidence.</p>;
+  if (image.error) return <p role="alert">{image.error}</p>;
+  if (!image.url) return <p role="status">Loading authorized evidence…</p>;
+  return <a href={image.url} target="_blank" rel="noreferrer" aria-label={`Open ${alt}`}>
+    <img src={image.url} alt={alt} loading="lazy" />
+  </a>;
+}
 function VerificationComparison({ inspection }: { inspection: Inspection }) {
   const { token } = useContext(TokenContext);
+  const qc = useQueryClient();
   const previous = useQuery({
     queryKey: ["inspection", inspection.previous_inspection_id],
     queryFn: () => api<Inspection>(`/inspections/${inspection.previous_inspection_id}`),
@@ -1606,12 +1642,34 @@ function VerificationComparison({ inspection }: { inspection: Inspection }) {
     queryKey: ["verification-status", inspection.order_id, inspection.id],
     queryFn: () => api<{verification_status: string; revision_current: boolean;
       order_version: number; inspection_order_version: number | null;
+      shipping_status: string;
+      requires_reinspection: boolean;
       picking_tasks: {id: string; product_id: string; quantity: number; status: string}[];
       removal_tasks: {id: string; product_id: string; quantity: number; status: string}[]}>(
       `/orders/${inspection.order_id}/verification-status`,
       {headers: {Authorization: `Bearer ${token}`}}),
     enabled: !!token,
   });
+
+  const shippingTransition = useMutation({
+    mutationFn: (target: "READY_TO_SHIP" | "SHIPPED") =>
+      api<Order>(`/orders/${inspection.order_id}/shipping-transition`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          target,
+          idempotency_key: `ship-${inspection.order_id}-${target}-${Date.now()}`,
+        }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["verification-status"] });
+      qc.invalidateQueries({ queryKey: ["orders"] });
+    },
+  });
+
   if (!inspection.previous_inspection_id) return null;
   return (
     <Panel title="Before and after" subtitle="Saved visual evidence and server-calculated quantities.">
@@ -1640,9 +1698,8 @@ function VerificationComparison({ inspection }: { inspection: Inspection }) {
               {[previous.data, inspection].map((item, index) => (
                 <figure key={item.id}>
                   <figcaption>{index === 0 ? "BEFORE CORRECTION" : "AFTER CORRECTION"} · {formatTime(item.created_at)} · {label(item.status)}</figcaption>
-                  <a href={item.image_url} target="_blank" rel="noreferrer" aria-label={`Open ${index === 0 ? "before" : "after"} evidence image`}>
-                    <img src={item.annotation_url ?? item.image_url} alt={`${index === 0 ? "Original" : "New"} inspection evidence`} />
-                  </a>
+                  <ProtectedEvidenceImage path={item.annotation_url ?? item.image_url}
+                    alt={`${index === 0 ? "Original" : "New"} inspection evidence`} />
                   <small>Photo ID: {item.photo_id}</small>
                 </figure>
               ))}
@@ -1655,6 +1712,47 @@ function VerificationComparison({ inspection }: { inspection: Inspection }) {
                   <td>{label(row.status)}</td></tr>;
               })}</tbody>
             </table>
+            <div className="shipping-safety-box" style={{ marginTop: "1.25rem", padding: "1rem", border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                <strong>Shipping authorization & safety</strong>
+                <Status value={status.data?.shipping_status ?? "NOT_READY"} />
+              </div>
+              {status.data?.verification_status === "VERIFIED" && !status.data.requires_reinspection ? (
+                <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+                  {status.data.shipping_status === "NOT_READY" && (
+                    <Button
+                      size="sm"
+                      disabled={!token || shippingTransition.isPending}
+                      onClick={() => shippingTransition.mutate("READY_TO_SHIP")}
+                    >
+                      Authorize shipping (READY TO SHIP)
+                    </Button>
+                  )}
+                  {status.data.shipping_status === "READY_TO_SHIP" && (
+                    <Button
+                      size="sm"
+                      disabled={!token || shippingTransition.isPending}
+                      onClick={() => shippingTransition.mutate("SHIPPED")}
+                    >
+                      Confirm order dispatch (SHIPPED)
+                    </Button>
+                  )}
+                  {status.data.shipping_status === "SHIPPED" && (
+                    <span style={{ fontSize: "0.875rem", color: "var(--foreground-muted)" }}>Order is shipped. Further shipping transitions are locked.</span>
+                  )}
+                  {shippingTransition.isPending && <span>Processing shipping transition...</span>}
+                </div>
+              ) : (
+                <p className="form-hint" style={{ margin: 0 }}>
+                  Shipping cannot be authorized. Unresolved discrepancies or required physical reinspection block shipping progression.
+                </p>
+              )}
+              {shippingTransition.isError && (
+                <p role="alert" className="field-error" style={{ marginTop: "0.5rem" }}>
+                  {shippingTransition.error.message}
+                </p>
+              )}
+            </div>
           </>
         )}
     </Panel>

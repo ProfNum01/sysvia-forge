@@ -126,8 +126,8 @@ def run_live(case, token):
                         "http_status": upload.status_code, "failed_safely": True}
             inspection_id = upload.json()["id"]
             analyzed = client.post(f"/api/inspections/{inspection_id}/analyze", headers=headers)
-            saved = client.get(f"/api/inspections/{inspection_id}").json()
-            order = client.get(f"/api/orders/{case['order_id']}").json()
+            saved = client.get(f"/api/inspections/{inspection_id}", headers=headers).json()
+            order = client.get(f"/api/orders/{case['order_id']}", headers=headers).json()
             result = {"inspection_id": inspection_id, "inspection_status": saved.get("status"),
                       "actual_discrepancies": sorted({d["type"] for d in saved.get("discrepancies", [])}),
                       "comparison": saved.get("comparison", []),
@@ -146,7 +146,7 @@ def run_live(case, token):
                 result["investigation_seconds"] = round(time.monotonic() - started, 3)
                 result["investigation_attempted"] = True
                 result["investigation_http_status"] = investigation.status_code
-                current = client.get(f"/api/inspections/{inspection_id}").json()
+                current = client.get(f"/api/inspections/{inspection_id}", headers=headers).json()
                 result["decision"] = (current.get("investigation_result") or {}).get("decision")
                 result["decision_valid"] = investigation.status_code == 200 and bool(result["decision"])
                 with app.state.sessions() as db:

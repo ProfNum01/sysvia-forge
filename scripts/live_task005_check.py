@@ -53,7 +53,7 @@ def main():
                   f"decision={(decision.get('investigation_result') or {}).get('decision')} "
                   f"actions={sorted({row['type'] for row in decision.get('actions', [])})} "
                   f"live_agent_calls={calls} completed_tools={tools} shipping="
-                  f"{client.get('/api/orders/order-1001').json().get('shipping_status')}", flush=True)
+                  f"{client.get('/api/orders/order-1001', headers=headers).json().get('shipping_status')}", flush=True)
             return 0 if investigated.status_code == 200 else 1
 
 

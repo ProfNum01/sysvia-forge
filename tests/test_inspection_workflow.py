@@ -43,6 +43,7 @@ class InspectionWorkflowTests(unittest.TestCase):
         with self.app.state.sessions() as db:
             seed_demo(db)
         self.auth = {"Authorization": "Bearer workflow-test-token"}
+        self.client.headers.update(self.auth)
 
     def tearDown(self):
         self.context.__exit__(None, None, None)
@@ -190,7 +191,7 @@ class InspectionWorkflowTests(unittest.TestCase):
         status = self.client.get("/api/orders/order-1001/verification-status", headers=self.auth)
         self.assertEqual(status.json()["verification_status"], "VERIFIED")
         self.assertEqual(self.client.get("/api/orders/order-1001/verification-history", headers=self.auth).status_code, 200)
-        self.assertEqual(self.client.get(f"/api/inspections/{newer['id']}/evidence").status_code, 403)
+        self.assertEqual(self.client.get(f"/api/inspections/{newer['id']}/evidence", headers={"Authorization": ""}).status_code, 403)
 
     def test_changed_requirements_cannot_verify_stale_uploaded_evidence(self):
         from backend.app.models.database import OrderItem
@@ -387,8 +388,10 @@ class InspectionWorkflowTests(unittest.TestCase):
             db.execute("INSERT INTO inspection_observations VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                        ("legacy-observation", "legacy-inspection", None, None, "Unreadable", "Original ambiguous evidence", False, False))
         settings = Settings(data_dir=legacy_dir, database_url=f"sqlite:///{legacy_db}", operator_token="legacy-test-token")
+        auth = {"Authorization": "Bearer legacy-test-token"}
         upgraded_app = create_app(settings)
         with TestClient(upgraded_app) as client:
+            client.headers.update(auth)
             with upgraded_app.state.sessions() as db:
                 seed_demo(db)
             response = client.get("/api/inspections/legacy-inspection")
@@ -400,10 +403,11 @@ class InspectionWorkflowTests(unittest.TestCase):
             self.assertEqual(saved["observations"][0]["identification_status"], "UNCERTAIN")
             self.assertEqual(saved["observations"][0]["evidence_region_ids"], [])
             self.assertEqual((saved["image_width"], saved["image_height"]), (32, 32))
-            self.assertEqual(client.get(saved["image_url"]).content, image)
+            self.assertEqual(client.get(saved["image_url"], headers={"Authorization": "Bearer legacy-test-token"}).content, image)
             self.assertEqual(original_path.read_bytes(), image)
         # The additive upgrade is repeatable and cannot discard retained evidence.
         with TestClient(create_app(settings)) as client:
+            client.headers.update(auth)
             self.assertEqual(client.get("/api/inspections/legacy-inspection").json()["photo_id"], photo_id)
 
 

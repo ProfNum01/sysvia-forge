@@ -18,6 +18,7 @@ import {
   sourceBox,
 } from "../lib/evidence";
 import { formatTime, label } from "../lib/api";
+import { useProtectedImage } from "../lib/protected-image";
 import type {
   EvidenceRegion,
   Inspection,
@@ -27,11 +28,13 @@ import type {
 
 export function EvidenceViewer({
   inspection,
+  token,
   products,
   selectedRegionIds,
   onSelectRegion,
 }: {
   inspection: Inspection;
+  token: string;
   products: Product[];
   selectedRegionIds: string[];
   onSelectRegion: (ids: string[]) => void;
@@ -40,6 +43,7 @@ export function EvidenceViewer({
   const [overlays, setOverlays] = useState(true);
   const [masks, setMasks] = useState(true);
   const [imageError, setImageError] = useState(false);
+  const protectedImage = useProtectedImage(inspection.image_url, token);
   const width = inspection.image_width;
   const height = inspection.image_height;
   const dimensionsKnown =
@@ -174,14 +178,14 @@ export function EvidenceViewer({
         role="region"
         aria-label="Scrollable original inspection image and evidence overlays"
       >
-        {!inspection.image_url || imageError ? (
+        {!token || !inspection.image_url || imageError || protectedImage.error ? (
           <div className="viewer-empty">
             <ImageOff size={25} aria-hidden="true" />
             <p>
               Original image unavailable. The evidence record remains preserved.
             </p>
           </div>
-        ) : dimensionsKnown ? (
+        ) : protectedImage.pending ? <div className="viewer-empty">Loading authorized evidence…</div> : dimensionsKnown ? (
           <svg
             className="source-image-svg"
             viewBox={`0 0 ${width} ${height}`}
@@ -191,7 +195,7 @@ export function EvidenceViewer({
             aria-label="Original uploaded image with actual SAM source-coordinate regions"
           >
             <image
-              href={inspection.image_url}
+              href={protectedImage.url}
               x="0"
               y="0"
               width={width}
@@ -206,7 +210,7 @@ export function EvidenceViewer({
           </svg>
         ) : (
           <img
-            src={inspection.image_url}
+            src={protectedImage.url}
             alt={`Original uploaded evidence for inspection ${inspection.id}`}
             style={{ width: `${zoom * 100}%`, maxWidth: "none" }}
             onError={() => setImageError(true)}

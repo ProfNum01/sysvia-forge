@@ -31,6 +31,7 @@ class ActionEngineTests(unittest.TestCase):
         with self.app.state.sessions() as db:
             seed_demo(db)
         self.auth = {"Authorization": "Bearer action-test-token"}
+        self.client.headers.update(self.auth)
 
     def tearDown(self):
         self.context.__exit__(None, None, None)
@@ -97,7 +98,8 @@ class ActionEngineTests(unittest.TestCase):
         task = next(a for a in investigated["actions"] if a["type"] == "CREATE_PICKING_TASK")
         path = f"/api/actions/{task['id']}/reject"
         body = {"idempotency_key": "reject-task-1234", "reason": "Need a clearer physical count."}
-        self.assertEqual(self.client.post(path, headers={"X-Role": "supervisor"}, json=body).status_code, 403)
+        # httpx merges with default auth; use Authorization: '' to simulate truly unauthenticated request.
+        self.assertEqual(self.client.post(path, headers={"Authorization": "", "X-Role": "supervisor"}, json=body).status_code, 403)
         self.assertEqual(self.client.post(path, headers=self.auth, json=body).json()["status"], "REJECTED")
         self.assertEqual(self.client.post(path, headers=self.auth, json=body).status_code, 200)
         self.assertEqual(self.client.post(f"/api/actions/{task['id']}/execute", headers=self.auth,
@@ -412,12 +414,14 @@ class ActionEngineTests(unittest.TestCase):
         self.app = create_app(self.settings)
         self.context = TestClient(self.app)
         self.client = self.context.__enter__()
+        self.client.headers.update(self.auth)  # restore auth after schema-migration client recreation
         for startup in range(2):
             if startup:
                 self.context.__exit__(None, None, None)
                 self.app = create_app(self.settings)
                 self.context = TestClient(self.app)
                 self.client = self.context.__enter__()
+                self.client.headers.update(self.auth)  # restore auth after client recreation
             with self.app.state.sessions() as db:
                 retained = db.get(CorrectiveAction, hold["id"])
                 self.assertEqual((retained.status, retained.lifecycle_state), ("EXECUTED", "AWAITING_REINSPECTION"))

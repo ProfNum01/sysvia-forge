@@ -5,6 +5,10 @@ import { fileURLToPath, URL } from "node:url";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+  // @ts-ignore
+  test: {
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+  },
   server: {
     host: "127.0.0.1",
     port: 5173,

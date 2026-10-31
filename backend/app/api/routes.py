@@ -96,12 +96,12 @@ def health(db=Depends(database)):
 
 
 @router.get("/orders", response_model=list[OrderOut])
-def orders(db=Depends(database)):
+def orders(actor=Depends(supervisor), db=Depends(database)):
     return list(db.scalars(select(Order).order_by(Order.reference)))
 
 
 @router.get("/products", response_model=list[ProductOut])
-def product_catalog(db=Depends(database)):
+def product_catalog(actor=Depends(supervisor), db=Depends(database)):
     return list(db.scalars(select(Product).order_by(Product.sku)))
 
 
@@ -135,17 +135,17 @@ def product_reference(request: Request, product_id: str, db=Depends(database)):
 
 
 @router.get("/orders/{order_id}", response_model=OrderOut)
-def order_detail(order_id: str, db=Depends(database)):
+def order_detail(order_id: str, actor=Depends(supervisor), db=Depends(database)):
     return required(db, Order, order_id)
 
 
 @router.get("/inspections", response_model=list[InspectionOut])
-def inspections(db=Depends(database)):
+def inspections(actor=Depends(supervisor), db=Depends(database)):
     return [inspection_out(i) for i in db.scalars(select(Inspection).order_by(Inspection.created_at.desc()).limit(100))]
 
 
 @router.get("/dashboard/summary", response_model=DashboardOut)
-def dashboard(db=Depends(database)):
+def dashboard(actor=Depends(supervisor), db=Depends(database)):
     orders = list(db.scalars(select(Order).order_by(Order.reference)))
     states = Counter(order.status for order in orders)
     attention = []
@@ -286,7 +286,7 @@ def reinspect(request: Request, inspection_id: str, image: Annotated[UploadFile,
 
 @router.get("/inspections/{inspection_id}", response_model=InspectionOut)
 @router.get("/inspections/{inspection_id}/results", response_model=InspectionOut)
-def inspection_detail(inspection_id: str, db=Depends(database)):
+def inspection_detail(inspection_id: str, actor=Depends(supervisor), db=Depends(database)):
     return inspection_out(required(db, Inspection, inspection_id))
 
 
@@ -346,13 +346,13 @@ def verification_history(order_id: str, actor=Depends(supervisor), db=Depends(da
 
 
 @router.get("/inspections/{inspection_id}/image")
-def image_file(inspection_id: str, db=Depends(database)):
+def image_file(inspection_id: str, actor=Depends(supervisor), db=Depends(database)):
     return FileResponse(required(db, Inspection, inspection_id).image_path, media_type="image/png",
                         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/inspections/{inspection_id}/annotation")
-def annotation_file(inspection_id: str, db=Depends(database)):
+def annotation_file(inspection_id: str, actor=Depends(supervisor), db=Depends(database)):
     inspection = required(db, Inspection, inspection_id)
     path = Path(inspection.image_path).parent / f"{inspection.id}-annotated.png"
     if not path.is_file():
@@ -911,5 +911,5 @@ def shipping_transition(request: Request, order_id: str, body: ShippingRequest, 
 
 
 @router.get("/audit-events", response_model=list[AuditOut])
-def audit_events(db=Depends(database)):
+def audit_events(actor=Depends(supervisor), db=Depends(database)):
     return list(db.scalars(select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(200)))

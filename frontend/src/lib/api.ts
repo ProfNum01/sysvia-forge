@@ -1,10 +1,17 @@
+let operatorToken = "";
+export function setApiOperatorToken(token: string) {
+  operatorToken = token;
+}
 export async function api<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`/api${path}`, options);
+    const headers = new Headers(options.headers);
+    if (operatorToken && !headers.has("Authorization"))
+      headers.set("Authorization", `Bearer ${operatorToken}`);
+    response = await fetch(`/api${path}`, { ...options, headers });
   } catch {
     throw new Error(
       "The local API is unreachable. Start the ProofSight backend on port 8000 and retry.",

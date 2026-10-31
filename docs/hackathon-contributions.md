@@ -1,4 +1,4 @@
-﻿# Hackathon contributions
+# Hackathon contributions
 
 - 2026-10-30 — Task 002: added original synthetic catalog references and five labeled test scenes, source-image coordinates, official SAM mask overlays, conservative SKU/region association, deterministic comparison tables, actual processing events, retry-safe upload, and additive database migration. Verified 86 Python tests and 17 frontend tests in that task. Four additional live requests (ping, image analysis, two SAM streams) returned HTTP 200. The blue package had a supported region; red had no SAM corroboration, so the new inspection correctly remained NEEDS_REVIEW. No physical photograph or completed correction cycle was claimed.
 - 2026-10-29 — Initial Meta integration foundation: SDK clients, diagnostics, streaming SAM parser, and unit tests. This first pass was blocked by configuration; subsequent work below resolved it.
@@ -45,3 +45,39 @@
 - Two actual live benchmark cases used Muse Spark 1.3 and SAM 3.1: the correct-order scene reached VERIFIED with shipping NOT_READY; the additional-product scene remained NEEDS_REVIEW/HELD because green product identity was not sufficiently grounded. One real agent investigation returned HUMAN_REVIEW_REQUIRED; three read tools were called and completed. No corrective action was approved or executed. The inspection metadata records two Muse visual requests and five SAM requests; the earlier benchmark artifact did not retain the additional agent request count, so that count is not claimed.
 - The two-sample combined results report zero false verifications and zero shipping safety violations, four supported product-quantity pairs agreeing with the procedural scene manifest, and one valid backend-accepted agent decision. These small synthetic samples do not measure real-world performance, region-level identification accuracy, physical correction, or live removal planning. One uncertain case is excluded from binary discrepancy precision/recall.
 - The local authenticated browser read returned HTTP 200, all seven routes loaded, five synthetic assets appeared, and Chromium reported zero console errors or mobile overflow. The walkthrough was read-only and did not exercise approval or a complete inspection through the UI.
+
+## 2026-10-31 — Task 007 continuation: security hardening and test regression fix
+
+- Applied server-side authorization gate to `GET /api/inspections/{id}/image` and `GET /api/inspections/{id}/annotation` — uploaded evidence bytes now require a valid Bearer operator token (same `supervisor` dependency used on all mutation endpoints). Confirmed by `test_uploaded_evidence_requires_operator_authorization`.
+- Identified 11 test regressions introduced by the security hardening: tests that relied on httpx TestClient replacing default headers when passing `headers={}` or `headers={"X-Role": ...}` (httpx 0.28 merges, not replaces). Fixed all 11 by:
+  - Replacing empty-dict / role-only header dicts with explicit `{"Authorization": ""}` to simulate a missing/invalid token.
+  - Restoring `self.auth` headers on TestClient instances recreated after SQLite schema-migration in the legacy-upgrade test.
+  - Adding auth headers to standalone `TestClient` blocks in the additive-upgrade test that were not descended from the `setUp` client.
+- Final verified test counts: **134 backend tests passed, 41 subtests passed, 0 failures**; **23 frontend tests passed**; frontend production build passed.
+- Offline benchmark runner: 5 manifest cases validated, 0 live attempts, machine-readable JSON saved to `evaluation/results/`.
+- No live Meta requests were made in this continuation task. Physical correction validation remains BLOCKED (no owner-provided before/after physical photo pair). Authorized browser authentication walkthrough remains partially blocked by the operator credential gate in CI, but authenticated API tests prove the security model is enforced.
+
+## 2026-10-31 — Task 008 final release hardening & browser E2E validation
+
+- Integrated authenticated image loading in the React console (`useProtectedImage` and `ProtectedEvidenceImage`) using authenticated `fetch` and safe, short-lived Blob URLs with automatic `URL.revokeObjectURL` cleanup. Protected images are never accessible via raw unauthenticated URLs and operator tokens are never exposed in image query parameters.
+- Verified protected endpoints `GET /api/inspections/{id}/image` and `GET /api/inspections/{id}/annotation`: unauthenticated access is strictly rejected with 403 Forbidden; authenticated access with valid Bearer token returns 200 OK with `nosniff` and `no-store` headers.
+- Built and validated Playwright Chromium Authenticated Browser E2E suite (`e2e/run_workflow_e2e.cjs` and `e2e/workflow.spec.ts`) executing complete workflow:
+  1. Authorize local operator session via Settings form (token stored in sessionStorage).
+  2. Demo Workspace presentation with 5 synthetic scenarios clearly marked TEST FIXTURE.
+  3. Session persistence verified across browser reload.
+  4. Order selection and authoritative manifest verification.
+  5. Protected evidence loading verified via safe `blob:` URL without credential leakage.
+  6. Display of real observations and deterministic discrepancy (Shortfall).
+  7. Reinspection before-and-after comparison table listing catalog items and prior photo IDs.
+  8. AI operations investigation inspection with persisted decision and real read-tool execution events.
+  9. Proposed corrective actions review (reinspection / human review).
+  10. Shipping safety enforcement: unverified/held orders remain strictly HELD.
+- Regression testing:
+  - Backend: 135 backend tests passed (0 failures).
+  - Frontend: 23 vitest unit tests passed (0 failures).
+  - Production build: TypeScript checking and Vite production bundling passed cleanly.
+  - Authenticated Browser E2E: Playwright Chromium tests passed (2 of 2 spec tests passed; all 9 phases in E2E runner passed).
+  - SQLite integrity check: `[('ok',)]`, foreign key check: 0 violations.
+  - Offline benchmark runner: 5 procedural synthetic cases validated, output recorded.
+- Zero live Meta requests made in Task 008. Physical correction validation remains BLOCKED without physical warehouse imagery.
+

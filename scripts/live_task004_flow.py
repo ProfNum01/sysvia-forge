@@ -77,7 +77,7 @@ def main():
                 return 1
             after_id = replacement.json()["id"]
             verified = client.post(f"/api/inspections/{after_id}/analyze", headers=headers)
-            order = client.get("/api/orders/order-1001").json()
+            order = client.get("/api/orders/order-1001", headers=headers).json()
             print(f"analyze_after_http={verified.status_code} status={verified.json().get('status')} "
                   f"shipping={order.get('shipping_status')} revision_current="
                   f"{verified.json().get('order_version') == order.get('version')}", flush=True)

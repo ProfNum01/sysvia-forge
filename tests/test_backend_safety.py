@@ -49,6 +49,7 @@ class BackendSafetyTests(unittest.TestCase):
         with self.app.state.sessions() as db:
             seed_demo(db)
         self.auth = {"Authorization": "Bearer safety-supervisor-token"}
+        self.client.headers.update(self.auth)
 
     def tearDown(self):
         self.context.__exit__(None, None, None)
@@ -81,16 +82,62 @@ class BackendSafetyTests(unittest.TestCase):
         return analyzed.json()
 
     def test_upload_requires_real_authorization_and_cannot_spoof_role(self):
-        for headers in ({}, {"X-Role": "supervisor"}, {"Authorization": "Bearer incorrect-token"}):
+        # httpx merges headers with client defaults; use explicit empty Authorization to simulate missing token.
+        no_auth_cases = (
+            {"Authorization": ""},                           # no token
+            {"Authorization": "", "X-Role": "supervisor"},   # role spoof, no token
+            {"Authorization": "Bearer incorrect-token"},      # wrong token
+        )
+        for headers in no_auth_cases:
             with self.subTest(headers=headers):
                 self.assertEqual(self.upload(headers=headers).status_code, 403)
         with self.app.state.sessions() as db:
             self.assertEqual(db.scalar(select(func.count()).select_from(Inspection)), 0)
         self.assertFalse((self.settings.data_dir / "uploads").exists())
 
+    def test_protected_image_and_annotation_endpoints_require_real_authorization(self):
+        uploaded = self.upload()
+        self.assertEqual(uploaded.status_code, 201)
+        insp_id = uploaded.json()["id"]
+
+        # 1. Unauthenticated or wrong token access to image is denied with 403
+        for unauth_hdr in ({"Authorization": ""}, {"Authorization": "Bearer bad-token"}):
+            with self.subTest(endpoint="image", headers=unauth_hdr):
+                res = self.client.get(f"/api/inspections/{insp_id}/image", headers=unauth_hdr)
+                self.assertEqual(res.status_code, 403)
+
+        # 2. Authenticated access to image succeeds with 200 and image/png
+        res = self.client.get(f"/api/inspections/{insp_id}/image", headers=self.auth)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.headers.get("content-type"), "image/png")
+        self.assertEqual(res.headers.get("x-content-type-options"), "nosniff")
+
+        # 3. Unauthenticated access to annotation is denied with 403
+        for unauth_hdr in ({"Authorization": ""}, {"Authorization": "Bearer bad-token"}):
+            with self.subTest(endpoint="annotation", headers=unauth_hdr):
+                res = self.client.get(f"/api/inspections/{insp_id}/annotation", headers=unauth_hdr)
+                self.assertEqual(res.status_code, 403)
+
+        # 4. Authenticated access to annotation without generated annotation file returns 404
+        res = self.client.get(f"/api/inspections/{insp_id}/annotation", headers=self.auth)
+        self.assertEqual(res.status_code, 404)
+
+        # 5. When annotated file exists, authenticated access returns 200 and image/png
+        annotated_path = self.settings.data_dir / "uploads" / f"{insp_id}-annotated.png"
+        annotated_path.write_bytes(image_bytes("blue"))
+        res = self.client.get(f"/api/inspections/{insp_id}/annotation", headers=self.auth)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.headers.get("content-type"), "image/png")
+        self.assertEqual(res.headers.get("cache-control"), "no-store")
+
     def test_reinspection_requires_authorization_before_replacing_evidence(self):
         old = self.retryable_inspection()
-        for headers in ({}, {"X-Role": "supervisor"}, {"Authorization": "Bearer incorrect-token"}):
+        no_auth_cases = (
+            {"Authorization": ""},
+            {"Authorization": "", "X-Role": "supervisor"},
+            {"Authorization": "Bearer incorrect-token"},
+        )
+        for headers in no_auth_cases:
             with self.subTest(headers=headers):
                 response = self.upload(parent=old["id"], color="blue", headers=headers)
                 self.assertEqual(response.status_code, 403)
@@ -235,7 +282,8 @@ class BackendSafetyTests(unittest.TestCase):
         picking_id = executed.json()["execution_details"]["task_id"]
         completion = f"/api/picking-tasks/{picking_id}/complete"
         completion_body = {"idempotency_key": "physical-pick-report-12345678"}
-        self.assertEqual(self.client.post(completion, json=completion_body).status_code, 403)
+        # No auth token: override Authorization to empty so the supervisor gate rejects the request.
+        self.assertEqual(self.client.post(completion, json=completion_body, headers={"Authorization": ""}).status_code, 403)
         self.assertEqual(self.client.post(completion, json=completion_body, headers=self.auth).status_code, 200)
         self.assertEqual(self.client.post(completion, json=completion_body, headers=self.auth).status_code, 200)
         self.assertEqual(self.client.get("/api/orders/order-1001").json()["shipping_status"], "HELD")

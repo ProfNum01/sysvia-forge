@@ -32,6 +32,7 @@ class ApplicationTests(unittest.TestCase):
         with self.app.state.sessions() as db:
             seed_demo(db)
         self.auth = {"Authorization": "Bearer unit-supervisor-token"}
+        self.client.headers.update(self.auth)
 
     def tearDown(self):
         self.client_context.__exit__(None, None, None)
@@ -42,6 +43,12 @@ class ApplicationTests(unittest.TestCase):
         url = f"/api/inspections/{parent}/reinspect" if parent else "/api/inspections"
         return self.client.post(url, data={"order_id": "order-1001", "rights_confirmed": "true"},
                                 files={"image": ("test.png", picture(color), "image/png")}, headers=self.auth)
+
+    def test_uploaded_evidence_requires_operator_authorization(self):
+        inspection = self.upload().json()
+        self.assertEqual(self.client.get(inspection["image_url"], headers={"Authorization": ""}).status_code, 403)
+        self.assertEqual(self.client.get(inspection["image_url"], headers=self.auth).status_code, 200)
+        self.assertEqual(self.client.get(f"/api/inspections/{inspection['id']}/annotation", headers={"Authorization": ""}).status_code, 403)
 
     def run_model(self, inspection_id, quantity=2, certain=True):
         response = grounded_visual_result(quantity, certain=certain)
@@ -101,14 +108,16 @@ class ApplicationTests(unittest.TestCase):
         inspection = uploaded.json()
         self.assertEqual(inspection["status"], "UPLOADED")
         self.assertEqual(inspection["observations"], [])
-        self.assertEqual(self.client.get(inspection["image_url"]).status_code, 200)
+        self.assertEqual(self.client.get(inspection["image_url"], headers=self.auth).status_code, 200)
 
     def test_paid_model_operations_require_server_auth(self):
+        # httpx merges request headers with client defaults; use Authorization: '' to clear the token.
+        no_auth = {"Authorization": ""}
         inspection = self.upload().json()
-        self.assertEqual(self.client.post(f"/api/inspections/{inspection['id']}/analyze").status_code, 403)
-        self.assertEqual(self.client.post("/api/actions/nope/execute", json={"idempotency_key": "key-12345678"}).status_code, 403)
+        self.assertEqual(self.client.post(f"/api/inspections/{inspection['id']}/analyze", headers=no_auth).status_code, 403)
+        self.assertEqual(self.client.post("/api/actions/nope/execute", json={"idempotency_key": "key-12345678"}, headers=no_auth).status_code, 403)
         self.assertEqual(self.client.post("/api/actions/nope/approve", json={"idempotency_key": "key-12345678"},
-                                         headers={"X-Role": "supervisor"}).status_code, 403)
+                                         headers={"Authorization": "", "X-Role": "supervisor"}).status_code, 403)
 
     def test_missing_credentials_are_explicit_provider_error(self):
         from proofsight.meta_api import MetaConfigurationError
@@ -192,7 +201,7 @@ class ApplicationTests(unittest.TestCase):
         with TestClient(moved) as client:
             with moved.state.sessions() as db:
                 self.assertEqual(db.get(Inspection, inspection["id"]).image_path, str(canonical))
-            response = client.get(f"/api/inspections/{inspection['id']}/image")
+            response = client.get(f"/api/inspections/{inspection['id']}/image", headers=self.auth)
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.content, canonical.read_bytes())
 
