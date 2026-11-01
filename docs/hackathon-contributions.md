@@ -1,5 +1,21 @@
 # Hackathon contributions
 
+## 2026-11-01 — Operations Investigation Layout & Cross-App Action Button Differentiation
+
+- Repaired `ActiveInvestigationProgress` layout and animation performance on `/operations`:
+  - Re-architected `.investigation-stepper-grid` from 4-column blowout to a contained 2x2 grid (`grid-template-columns: repeat(2, minmax(0, 1fr))`, mobile `1fr`), eliminating horizontal overflow into adjacent card columns.
+  - Added CSS containment (`contain: paint; overflow: hidden; box-sizing: border-box; max-width: 100%`) on `.active-investigation-container` and `.investigation-card`.
+  - Stabilized animation loops (`@keyframes radar-pulse`, `shimmerSweep`, `.spin`) with `will-change: transform` and throttled the investigation progress timer from 100ms to 500ms intervals, eliminating layout thrashing and stutter.
+- Comprehensive semantic button differentiation:
+  - Table and workspace action buttons across `/orders`, `/operations`, and `InspectionTable` (Ledger and Overview) are now strictly styled with distinct high-contrast semantic palettes:
+    - `action-inspect` (Luminous Sky/Cyan gradient) for pending inspections.
+    - `action-review` (Warm Amber gradient) for discrepancy investigations.
+    - `action-hold` (Rose Crimson gradient) for held orders and quarantines.
+    - `action-verified` (Emerald Green gradient) for verified proof.
+    - `action-view` (Slate Outline) for evidence records.
+  - Updated Docker container `sysvia-proofsight-frontend-1` with the fresh compiled production build (`index-RATNp3O0.js` & `index-r8WOXJna.css`).
+- Verification: 24 frontend vitest tests passed; 158 backend pytest tests passed; Vite TypeScript production build succeeded with 0 errors.
+
 ## 2026-11-01 — Comprehensive semantic button differentiation across entire interface
 
 - Redesigned visual button hierarchy across the application to eliminate indistinguishable dark/outline buttons.

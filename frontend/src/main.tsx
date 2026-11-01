@@ -1059,13 +1059,70 @@ function InspectionTable({ inspections }: { inspections: Inspection[] }) {
               </td>
               <td className="muted">{formatTime(i.created_at)}</td>
               <td>
-                <Link
-                  className="icon-link"
-                  aria-label={`View inspection ${i.id}`}
-                  to={`/inspection?id=${encodeURIComponent(i.id)}`}
-                >
-                  <ChevronRight size={17} />
-                </Link>
+                {(() => {
+                  if (i.status === "VERIFIED") {
+                    return (
+                      <Button
+                        asChild
+                        variant="success"
+                        size="sm"
+                        className="btn-order-action action-verified"
+                      >
+                        <Link to={`/inspection?id=${encodeURIComponent(i.id)}`}>
+                          <CheckCircle2 size={13} aria-hidden="true" />
+                          <span>View Proof</span>
+                          <ArrowRight size={13} aria-hidden="true" />
+                        </Link>
+                      </Button>
+                    );
+                  }
+                  if (i.status === "NEEDS_REVIEW") {
+                    return (
+                      <Button
+                        asChild
+                        variant="warning"
+                        size="sm"
+                        className="btn-order-action action-review"
+                      >
+                        <Link to={`/inspection?id=${encodeURIComponent(i.id)}`}>
+                          <AlertTriangle size={13} aria-hidden="true" />
+                          <span>Review Issues</span>
+                          <ArrowRight size={13} aria-hidden="true" />
+                        </Link>
+                      </Button>
+                    );
+                  }
+                  if (i.status === "HELD") {
+                    return (
+                      <Button
+                        asChild
+                        variant="destructive"
+                        size="sm"
+                        className="btn-order-action action-hold"
+                      >
+                        <Link to={`/inspection?id=${encodeURIComponent(i.id)}`}>
+                          <ShieldAlert size={13} aria-hidden="true" />
+                          <span>Investigate Hold</span>
+                          <ArrowRight size={13} aria-hidden="true" />
+                        </Link>
+                      </Button>
+                    );
+                  }
+                  return (
+                    <Button
+                      asChild
+                      variant="outline"
+                      size="sm"
+                      className="btn-order-action action-view"
+                    >
+                      <Link to={`/inspection?id=${encodeURIComponent(i.id)}`}>
+                        <ScanLine size={13} aria-hidden="true" />
+                        <span>View Inspection</span>
+                        <ArrowRight size={13} aria-hidden="true" />
+                      </Link>
+                    </Button>
+                  );
+                })()}
               </td>
             </tr>
           ))}

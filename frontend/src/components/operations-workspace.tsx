@@ -293,8 +293,8 @@ export function ActiveInvestigationProgress({
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setElapsed((prev) => Math.round((prev + 0.1) * 10) / 10);
-    }, 100);
+      setElapsed((prev) => Math.round((prev + 0.5) * 10) / 10);
+    }, 500);
     return () => clearInterval(timer);
   }, []);
 
@@ -302,7 +302,7 @@ export function ActiveInvestigationProgress({
     {
       id: "manifest",
       label: "Order Manifest",
-      desc: "Target SKUs & quantities",
+      desc: "Target SKUs & lines",
       icon: Database,
     },
     {
@@ -314,13 +314,13 @@ export function ActiveInvestigationProgress({
     {
       id: "tools",
       label: "Read-Tool Check",
-      desc: "Auditing stock & history",
+      desc: "Stock & history audit",
       icon: FileSearch,
     },
     {
       id: "proposal",
       label: "Proposal Gate",
-      desc: "Drafting supervisor action",
+      desc: "Supervisor plan check",
       icon: ShieldCheck,
     },
   ];
@@ -663,10 +663,11 @@ export function InvestigationCard({
                 : "Start AI investigation"}
           </Button>
         )}
-        <Button asChild variant="outline" size="sm">
+        <Button asChild variant="outline" size="sm" className="btn-order-action action-view">
           <Link to={`/inspection?id=${encodeURIComponent(i.id)}`}>
             <FileSearch size={14} aria-hidden="true" />
-            View evidence
+            <span>View evidence</span>
+            <ArrowRight size={13} aria-hidden="true" />
           </Link>
         </Button>
         {!token && status !== "COMPLETED" && (
@@ -889,9 +890,10 @@ export function CorrectiveActionCard({
             aria-label="Server action pending"
           />
         )}
-        <Button asChild variant="ghost" size="sm">
+        <Button asChild variant="outline" size="sm" className="btn-order-action action-view">
           <Link to={`/inspection?id=${encodeURIComponent(a.inspection_id)}`}>
-            View evidence
+            <FileSearch size={14} aria-hidden="true" />
+            <span>View evidence</span>
             <ArrowRight size={13} aria-hidden="true" />
           </Link>
         </Button>
