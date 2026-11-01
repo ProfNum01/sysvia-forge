@@ -1,7 +1,17 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CircleAlert, Image, LoaderCircle, LockKeyhole, Package, Settings2 } from "lucide-react";
+import {
+  ArrowRight,
+  CircleAlert,
+  FileSearch,
+  Image,
+  LoaderCircle,
+  LockKeyhole,
+  Package,
+  ScanLine,
+  Settings2,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import { api, label } from "../lib/api";
 import type { DemoAsset, Inspection, MetaStatus, Order } from "../types";
@@ -63,7 +73,14 @@ export function DemoWorkspace({ token }: { token: string }) {
               {demoOrders.map((order) => <option key={order.id} value={order.id}>{order.reference} · {label(order.status)}{order.data_source === "physical_capture" ? " · PHYSICAL_CAPTURE" : ""}</option>)}
             </select>
             {selected && <div className="demo-manifest"><strong>Authoritative manifest · {selected.data_source === "physical_capture" ? "PHYSICAL_CAPTURE" : "SYNTHETIC"}</strong><span>{selected.items.map((item) => `${item.product.sku} × ${item.quantity}`).join(" · ")}</span><span>Shipping: {label(selected.shipping_status ?? "NOT_READY")}</span></div>}
-            {selected && (selected.data_source === "physical_capture" || selected.latest_inspection_id) && <Button asChild size="sm" variant="outline"><Link to={selected.latest_inspection_id ? `/inspection?id=${selected.latest_inspection_id}` : `/inspection?order=${selected.id}`}>Open inspection evidence <ArrowRight size={14} aria-hidden="true" /></Link></Button>}
+            {selected && (selected.data_source === "physical_capture" || selected.latest_inspection_id) && (
+              <Button asChild size="sm" variant="primary">
+                <Link to={selected.latest_inspection_id ? `/inspection?id=${selected.latest_inspection_id}` : `/inspection?order=${selected.id}`}>
+                  <FileSearch size={14} aria-hidden="true" />
+                  Open inspection evidence <ArrowRight size={14} aria-hidden="true" />
+                </Link>
+              </Button>
+            )}
             {inspection.data && (
               <div className="demo-recorded-evidence">
                 <strong>Recorded live inference</strong>
@@ -109,13 +126,20 @@ export function DemoWorkspace({ token }: { token: string }) {
             <img src={asset.url} alt={`${asset.title}, original synthetic test scene`} loading="lazy" />
             <div><span className="eyebrow">{asset.provenance === "synthetic_claude" ? "CLAUDE AI · SYNTHETIC" : asset.provenance === "synthetic_packing" ? "SYNTHETIC PACKING" : "TEST FIXTURE"}</span><h3>{asset.title}</h3><p>{asset.description}</p>
               {canUse ? (
-                <Button asChild size="sm" variant="outline"><Link to={`/inspection?${query}`}>
-                  Use in inspection <ArrowRight size={14} aria-hidden="true" /></Link></Button>
+                <Button asChild size="sm" variant="inspect">
+                  <Link to={`/inspection?${query}`}>
+                    <ScanLine size={14} aria-hidden="true" />
+                    Use in inspection <ArrowRight size={14} aria-hidden="true" />
+                  </Link>
+                </Button>
               ) : asset.provenance === "synthetic_packing" && !!token ? (
                 <span className="demo-message">{asset.name.endsWith("after") ? "Inspect the before image and complete any required approval first." : "This order already has evidence; follow its inspection chain."}</span>
               ) : (
-                <Button asChild size="sm" variant="outline"><Link to="/settings">
-                  <LockKeyhole size={13} aria-hidden="true" /> Set token to use <ArrowRight size={14} aria-hidden="true" /></Link></Button>
+                <Button asChild size="sm" variant="warning">
+                  <Link to="/settings">
+                    <LockKeyhole size={13} aria-hidden="true" /> Set token to use <ArrowRight size={14} aria-hidden="true" />
+                  </Link>
+                </Button>
               )}
             </div>
           </article>;

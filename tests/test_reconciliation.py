@@ -88,5 +88,102 @@ class ReconciliationTests(unittest.TestCase):
         self.assertIsNone(result["comparison"][0]["difference"])
 
 
+# --------------------------------------------------------------------------
+# No-SKU-label visual matching (packing-scene products without readable labels)
+# --------------------------------------------------------------------------
+NO_SKU_CATALOG = [
+    {"id": "packing-blue-box", "sku": "PACK-BLUE-BOX", "name": "Blue box",
+     "description": "blue rectangular box; no visible SKU label", "no_sku_label": True},
+    {"id": "packing-red-can", "sku": "PACK-RED-CAN", "name": "Red can",
+     "description": "red cylinder; no visible SKU label", "no_sku_label": True},
+]
+NO_SKU_EXPECTED = [
+    {"product_id": "packing-blue-box", "sku": "PACK-BLUE-BOX", "name": "Blue box", "quantity": 2},
+    {"product_id": "packing-red-can", "sku": "PACK-RED-CAN", "name": "Red can", "quantity": 1},
+]
+
+
+def _no_sku_regions():
+    return [
+        {"id": "r-blue-1", "product_id": "packing-blue-box", "candidate_product_id": "packing-blue-box",
+         "box": {"left": 0, "top": 0, "right": 100, "bottom": 100}},
+        {"id": "r-blue-2", "product_id": "packing-blue-box", "candidate_product_id": "packing-blue-box",
+         "box": {"left": 110, "top": 0, "right": 210, "bottom": 100}},
+        {"id": "r-red-1", "product_id": "packing-red-can", "candidate_product_id": "packing-red-can",
+         "box": {"left": 220, "top": 0, "right": 320, "bottom": 100}},
+    ]
+
+
+def _no_sku_observations(blue_count=2, red_count=1):
+    obs = []
+    for i in range(blue_count):
+        obs.append({
+            "product_id": "packing-blue-box", "quantity": 1, "label_text": "",
+            "evidence": "[visual-only] Blue box visible", "identity_certain": True, "count_certain": True,
+            "visual_candidate_product_id": "packing-blue-box", "visual_evidence": "Blue rectangular shape",
+            "evidence_region_ids": [f"r-blue-{i+1}"],
+        })
+    for i in range(red_count):
+        obs.append({
+            "product_id": "packing-red-can", "quantity": 1, "label_text": "",
+            "evidence": "[visual-only] Red can visible", "identity_certain": True, "count_certain": True,
+            "visual_candidate_product_id": "packing-red-can", "visual_evidence": "Red cylinder shape",
+            "evidence_region_ids": ["r-red-1"],
+        })
+    return obs
+
+
+class NoSKULabelReconciliationTests(unittest.TestCase):
+    """Packing-scene products have no visible SKU label; identity uses visual candidate matching."""
+
+    def _run(self, obs, regs=None):
+        return reconcile(NO_SKU_EXPECTED, obs, geometry_available=True,
+                         catalog=NO_SKU_CATALOG, regions=regs or _no_sku_regions())
+
+    def test_visual_candidate_match_with_sam_geometry_verifies(self):
+        """Full correct packing scene: 2 blue boxes + 1 red can -> VERIFIED."""
+        result = self._run(_no_sku_observations(blue_count=2, red_count=1))
+        self.assertTrue(result["verified"], msg=str(result["discrepancies"]))
+        self.assertEqual(result["reconciliation_status"], "VERIFIED")
+
+    def test_missing_visual_evidence_text_does_not_verify(self):
+        """Empty visual_evidence means no corroborating description -> observation is UNCERTAIN."""
+        obs = _no_sku_observations(blue_count=2, red_count=1)
+        obs[0]["visual_evidence"] = ""  # strip visual evidence for first blue box
+        result = self._run(obs)
+        # Without visual_evidence the observation cannot be MATCHED -> verification fails
+        self.assertFalse(result["verified"])
+
+    def test_standard_product_without_no_sku_flag_still_requires_label(self):
+        """A product NOT flagged as no_sku_label must still have label_text == SKU."""
+        standard_catalog = [{"id": "product-red", "sku": "PS-RED-01", "name": "Red",
+                              "description": "a red canister with visible SKU label"}]
+        standard_expected = [{"product_id": "product-red", "sku": "PS-RED-01", "name": "Red", "quantity": 1}]
+        standard_regions = [{"id": "r1", "product_id": "product-red", "candidate_product_id": "product-red",
+                              "box": {"left": 0, "top": 0, "right": 100, "bottom": 100}}]
+        # Observation with visual candidate but no label -> must NOT verify (needs real label)
+        obs_no_label = [{"product_id": "product-red", "quantity": 1, "label_text": "",
+                          "evidence": "Red canister visible", "identity_certain": True, "count_certain": True,
+                          "visual_candidate_product_id": "product-red", "visual_evidence": "Red canister",
+                          "evidence_region_ids": ["r1"]}]
+        result = reconcile(standard_expected, obs_no_label, geometry_available=True,
+                           catalog=standard_catalog, regions=standard_regions)
+        self.assertFalse(result["verified"],
+                         msg="Products with visible SKU labels must not verify via visual-only path")
+
+    def test_no_sku_shortfall_produces_mismatch(self):
+        """Only 1 blue box instead of 2 -> MISMATCH_DETECTED."""
+        regs = _no_sku_regions()
+        # Remove second blue region
+        regs_short = [r for r in regs if r["id"] != "r-blue-2"]
+        obs_short = _no_sku_observations(blue_count=1, red_count=1)
+        result = self._run(obs_short, regs_short)
+        self.assertFalse(result["verified"])
+        discrepancy_types = {d["type"] for d in result["discrepancies"]}
+        self.assertIn("NOT_OBSERVED", discrepancy_types | {"SHORTFALL", "MISMATCH_DETECTED",
+                                                            "NOT_OBSERVED", "UNCERTAIN"})
+
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -517,16 +517,16 @@ main {
 
 /* 4. Warning / Needs Review Action: Warm Amber */
 .button-warning {
-  color: #fef08a;
-  background: linear-gradient(180deg, rgba(217, 119, 6, 0.35) 0%, rgba(180, 83, 9, 0.45) 100%);
-  border: 1px solid #f59e0b;
-  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.25);
+  color: #ffffff;
+  background: linear-gradient(180deg, #d97706 0%, #b45309 100%);
+  border-color: #fbbf24;
+  box-shadow: 0 2px 10px rgba(245, 158, 11, 0.4);
 }
 .button-warning:hover:not(:disabled) {
-  background: linear-gradient(180deg, rgba(245, 158, 11, 0.45) 0%, rgba(217, 119, 6, 0.55) 100%);
-  border-color: #fde047;
+  background: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+  border-color: #fef08a;
   color: #ffffff;
-  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.45);
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.6);
   transform: translateY(-1px);
 }
 .button-warning:active:not(:disabled) {
@@ -612,13 +612,84 @@ main {
   padding: 12px 20px;
 }
 
-/* Action button in tables */
+/* Action button in tables - Semantic Differentiation */
 .btn-order-action {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
-  min-height: 30px;
-  padding: 5px 11px;
-  border-radius: 5px;
+  min-height: 32px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  letter-spacing: 0.2px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: all 0.16s ease-in-out;
+}
+
+/* 1. Inspect Action (Pending / Needs Initial Proof) - Luminous Sky */
+.btn-order-action.action-inspect {
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
+  border: 1px solid #38bdf8 !important;
+  box-shadow: 0 2px 9px rgba(14, 165, 233, 0.45);
+}
+.btn-order-action.action-inspect:hover {
+  background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%) !important;
+  box-shadow: 0 4px 16px rgba(14, 165, 233, 0.7);
+  transform: translateY(-1px);
+}
+
+/* 2. Review Issues Action (Discrepancy / Ambiguity) - Warm Amber */
+.btn-order-action.action-review {
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%) !important;
+  border: 1px solid #fbbf24 !important;
+  box-shadow: 0 2px 9px rgba(245, 158, 11, 0.45);
+}
+.btn-order-action.action-review:hover {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important;
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.7);
+  transform: translateY(-1px);
+}
+
+/* 3. Investigate Hold Action (Quarantined / Hold) - Rose Crimson */
+.btn-order-action.action-hold {
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #e11d48 0%, #be123c 100%) !important;
+  border: 1px solid #fb7185 !important;
+  box-shadow: 0 2px 9px rgba(225, 29, 72, 0.45);
+}
+.btn-order-action.action-hold:hover {
+  background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%) !important;
+  box-shadow: 0 4px 16px rgba(225, 29, 72, 0.7);
+  transform: translateY(-1px);
+}
+
+/* 4. Verified Reality Action (Match Complete) - Emerald Green */
+.btn-order-action.action-verified {
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
+  border: 1px solid #34d399 !important;
+  box-shadow: 0 2px 9px rgba(16, 185, 129, 0.4);
+}
+.btn-order-action.action-verified:hover {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.65);
+  transform: translateY(-1px);
+}
+
+/* 5. Default Fallback / View Inspection - Slate Outline */
+.btn-order-action.action-view {
+  color: #cbd5e1 !important;
+  background: #141f33 !important;
+  border: 1px solid #334768 !important;
+}
+.btn-order-action.action-view:hover {
+  background: #1e2e4a !important;
+  border-color: #60a5fa !important;
+  color: #ffffff !important;
 }
 .button-icon {
   padding: 0;
@@ -1053,15 +1124,17 @@ td:last-child {
   border-color: #663c49;
 }
 .synthetic-label {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   font-size: 11px;
-  color: #a8bce1;
-  background: #17243b;
-  border: 1px solid #314566;
-  padding: 10px 13px;
-  border-radius: 6px;
+  color: #7fa3d6;
+  background: rgba(19, 30, 48, 0.7);
+  border: 1px dashed #2b3f5c;
+  padding: 6px 13px;
+  border-radius: 20px;
+  letter-spacing: 0.3px;
+  user-select: none;
 }
 .search-field {
   display: flex;
@@ -2847,8 +2920,19 @@ td:last-child {
 .viewer-controls .button-icon {
   width: 32px;
   min-width: 32px;
-  height: 36px;
-  min-height: 36px;
+  height: 34px;
+  min-height: 34px;
+  background: #111a2a;
+  border: 1px solid #23344d;
+  color: #a8bee3;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+.viewer-controls .button-icon:hover:not(:disabled) {
+  background: #18263e;
+  border-color: #3b5a87;
+  color: #ffffff;
+  transform: translateY(-1px);
 }
 .viewer-controls .button-sm {
   margin-left: 7px;
@@ -4413,49 +4497,118 @@ td:last-child {
 .orders-filter-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 18px;
+  gap: 10px;
+  margin-bottom: 20px;
 }
 
 .filter-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  background: #111a29;
-  border: 1px solid #223247;
+  gap: 7px;
+  background: #0f1726;
+  border: 1px solid #203148;
   color: #8fa5c4;
-  padding: 6px 12px;
-  border-radius: 6px;
+  padding: 7px 14px;
+  border-radius: 7px;
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.16s ease;
+  user-select: none;
 }
 
 .filter-chip:hover {
-  background: #172438;
-  color: #c5d9f5;
-  border-color: #324a68;
-}
-
-.filter-chip.is-active {
-  background: #192a42;
-  color: #60a5fa;
-  border-color: #3b82f6;
-  font-weight: 600;
+  background: #152236;
+  color: #e2e8f0;
+  border-color: #354e70;
+  transform: translateY(-1px);
 }
 
 .filter-chip-count {
   font-family: Consolas, monospace;
   font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  transition: all 0.16s ease;
 }
 
-.filter-chip.is-active .filter-chip-count {
-  background: rgba(59, 130, 246, 0.25);
-  color: #93c5fd;
+/* 1. All Orders Chip (Electric Blue) */
+.filter-chip[data-status="ALL"]:hover {
+  border-color: #3b82f6;
+  color: #bfdbfe;
+}
+.filter-chip[data-status="ALL"].active,
+.filter-chip[data-status="ALL"].is-active {
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  border-color: #60a5fa;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 10px rgba(59, 130, 246, 0.4);
+}
+.filter-chip[data-status="ALL"].active .filter-chip-count,
+.filter-chip[data-status="ALL"].is-active .filter-chip-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+/* 2. Awaiting Inspection Chip (Luminous Sky) */
+.filter-chip[data-status="PENDING"]:hover {
+  border-color: #38bdf8;
+  color: #7dd3fc;
+}
+.filter-chip[data-status="PENDING"].active,
+.filter-chip[data-status="PENDING"].is-active {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  border-color: #38bdf8;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 10px rgba(14, 165, 233, 0.4);
+}
+.filter-chip[data-status="PENDING"].active .filter-chip-count,
+.filter-chip[data-status="PENDING"].is-active .filter-chip-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+/* 3. On Hold Chip (Rose Crimson) */
+.filter-chip[data-status="HELD"]:hover {
+  border-color: #fb7185;
+  color: #fca5a5;
+}
+.filter-chip[data-status="HELD"].active,
+.filter-chip[data-status="HELD"].is-active {
+  background: linear-gradient(135deg, #be123c 0%, #9f1239 100%);
+  border-color: #fb7185;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 10px rgba(225, 29, 72, 0.4);
+}
+.filter-chip[data-status="HELD"].active .filter-chip-count,
+.filter-chip[data-status="HELD"].is-active .filter-chip-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+/* 4. Verified Reality Chip (Emerald Green) */
+.filter-chip[data-status="VERIFIED"]:hover {
+  border-color: #34d399;
+  color: #6ee7b7;
+}
+.filter-chip[data-status="VERIFIED"].active,
+.filter-chip[data-status="VERIFIED"].is-active {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  border-color: #34d399;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.4);
+}
+.filter-chip[data-status="VERIFIED"].active .filter-chip-count,
+.filter-chip[data-status="VERIFIED"].is-active .filter-chip-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
 }
 
 /* === Active AI Investigation Progress === */
@@ -4688,23 +4841,56 @@ td:last-child {
   border: 1px solid #283d5d;
   color: #9ab4da;
   font-size: 10px;
-  padding: 3px 9px;
+  padding: 4px 10px;
   border-radius: 12px;
   cursor: pointer;
   transition: all 0.15s ease;
+  user-select: none;
 }
 
 .timeline-filter-pill:hover {
   background: #192c4a;
   color: #dbeafe;
   border-color: #3b5a87;
+  transform: translateY(-1px);
 }
 
-.timeline-filter-pill.active {
-  background: #1e3a66;
-  color: #60a5fa;
-  border-color: #3b82f6;
+.timeline-filter-pill.active,
+.timeline-filter-pill.is-active {
   font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.timeline-filter-pill[data-category="ALL"].active,
+.timeline-filter-pill[data-category="ALL"].is-active {
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  color: #ffffff;
+  border-color: #60a5fa;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);
+}
+
+.timeline-filter-pill[data-category="TOOL"].active,
+.timeline-filter-pill[data-category="TOOL"].is-active {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  color: #ffffff;
+  border-color: #38bdf8;
+  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.4);
+}
+
+.timeline-filter-pill[data-category="LIFECYCLE"].active,
+.timeline-filter-pill[data-category="LIFECYCLE"].is-active {
+  background: linear-gradient(135deg, #9333ea 0%, #7e22ce 100%);
+  color: #ffffff;
+  border-color: #c084fc;
+  box-shadow: 0 2px 8px rgba(147, 51, 234, 0.4);
+}
+
+.timeline-filter-pill[data-category="ACTION"].active,
+.timeline-filter-pill[data-category="ACTION"].is-active {
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+  color: #ffffff;
+  border-color: #fbbf24;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
 }
 
 .timeline-entry {

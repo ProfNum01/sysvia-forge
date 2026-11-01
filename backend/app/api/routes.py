@@ -280,12 +280,22 @@ def create_inspection(request, db, order_id, image, rights_confirmed, parent=Non
         db.flush()
         order.latest_inspection_id = inspection.id
         if parent:
-            for action in parent.actions:
-                if action.investigation_id is None and action.status == "PROPOSED":
-                    action.status = "SUPERSEDED"
-                    action.lifecycle_state = "SUPERSEDED"
-                    audit(db, "AUTOMATIC_HOLD_SUPERSEDED", action.id,
-                          {"new_inspection_id": inspection.id, "new_photo_id": inspection.photo_id})
+            # Supersede stale PROPOSED actions across the entire inspection chain,
+            # not only the direct parent. Earlier chain members can retain un-superseded
+            # PROPOSED actions when they were never directly reinspected (their own
+            # reinspection superseded their direct children only).  Without this sweep,
+            # finish_analysis finds them as "unresolved" and blocks VERIFIED transitions.
+            chain_node = parent
+            while chain_node:
+                for action in chain_node.actions:
+                    if action.investigation_id is None and action.status in {"PROPOSED", "PENDING_APPROVAL"}:
+                        action.status = "SUPERSEDED"
+                        action.lifecycle_state = "SUPERSEDED"
+                        audit(db, "AUTOMATIC_HOLD_SUPERSEDED", action.id,
+                              {"new_inspection_id": inspection.id, "new_photo_id": inspection.photo_id,
+                               "chain_depth": "ancestor" if chain_node.id != parent.id else "direct_parent"})
+                chain_node = (db.get(Inspection, chain_node.previous_inspection_id)
+                              if chain_node.previous_inspection_id else None)
         if order.status != "HELD":
             order.status = "PENDING_INSPECTION"
         audit(db, "REINSPECTION_UPLOADED" if parent else "IMAGE_UPLOADED", inspection.id,
@@ -463,6 +473,7 @@ def analyze(request: Request, inspection_id: str, actor=Depends(supervisor), db=
                           "physical-" if order.data_source == "physical_capture" else
                           "packing-" if order.id.startswith("order-packing-") else "product-")
         products = [{"id": p.id, "sku": p.sku, "name": p.name, "color": p.color, "description": p.description,
+                     "no_sku_label": (p.visible_label == "NONE" or "no visible sku label" in p.description.lower()),
                      "reference_image_path": str(reference_path(request.app.state.settings.data_dir, p.id, p.sku,
                                                                   p.registered_reference_path))
                          if reference_path(request.app.state.settings.data_dir, p.id, p.sku,
@@ -570,6 +581,20 @@ def finish_analysis(db, inspection, result, sam, products, observations, regions
     unresolved_actions = list(db.scalars(select(CorrectiveAction).where(
         CorrectiveAction.inspection_id.in_(prior_ids),
         CorrectiveAction.status.not_in(["EXECUTED", "SUPERSEDED"])))) if prior_ids else []
+    # Defensive sweep: if reconciliation is verified and stale PROPOSED actions (no investigation_id)
+    # survived from earlier chain members, supersede them now.  Actions with an investigation_id
+    # always require explicit human review and are never auto-resolved here.
+    if reconciliation["verified"] and unresolved_actions:
+        stale_without_investigation = [a for a in unresolved_actions if a.investigation_id is None
+                                       and a.status in {"PROPOSED", "PENDING_APPROVAL"}]
+        if stale_without_investigation and len(stale_without_investigation) == len(unresolved_actions):
+            for action in stale_without_investigation:
+                action.status = "SUPERSEDED"
+                action.lifecycle_state = "SUPERSEDED"
+                audit(db, "AUTOMATIC_HOLD_SUPERSEDED", action.id,
+                      {"reason": "stale_pre_verification_sweep",
+                       "new_inspection_id": inspection.id, "new_photo_id": inspection.photo_id})
+            unresolved_actions = []
     open_picking = list(db.scalars(select(PickingTask).where(
         PickingTask.order_id == order.id, PickingTask.status != "COMPLETED")))
     open_removal = list(db.scalars(select(RemovalTask).where(

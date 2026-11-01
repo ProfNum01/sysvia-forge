@@ -26,6 +26,14 @@ def _iou(first: dict, second: dict) -> float:
     return intersection / (first_area + second_area - intersection)
 
 
+def _no_sku_label(product: dict) -> bool:
+    """Return True when the product catalog explicitly states no readable SKU label is present."""
+    if product.get("no_sku_label"):
+        return True
+    description = product.get("description", "")
+    return "no visible sku label" in description.lower()
+
+
 def build_regions(sam_runs: list[tuple[str | None, dict]]) -> list[dict]:
     """Keep actual SAM geometry; a prompt identifies a candidate, never a product.
 
@@ -65,20 +73,62 @@ def ground_observations(observations: list[dict], regions: list[dict], products:
     IoU >= 0.5 is an association threshold, not a confidence score. Aggregate
     claims without per-unit locations stay uncertain. Multiple claims to one
     region invalidate every claimant instead of accepting the first row.
+
+    For products with no visible SKU label (flagged via ``no_sku_label`` or the
+    seed description convention "no visible SKU label"), visual candidate matching
+    is used instead of SKU label matching.  The region's ``candidate_product_id``
+    must match the observation's ``visual_candidate_product_id`` and the region
+    must be uncontested.  This is a weaker signal than label identity; it is used
+    only when the catalog explicitly declares that no label is present.
     """
     catalog = {product["id"]: product for product in products}
     proposed: list[str | None] = []
     for row in observations:
         product_id = row.get("product_id")
+        visual_cand = row.get("visual_candidate_product_id")
         product = catalog.get(product_id)
-        eligible = (provider_ok and product is not None and row.get("label_text", "").strip() == product["sku"]
+        no_sku = product is not None and _no_sku_label(product)
+
+        # ── Standard SKU-label path ──────────────────────────────────────────
+        eligible = (provider_ok and product is not None
+                    and not no_sku
+                    and row.get("label_text", "").strip() == product["sku"]
                     and row.get("identity_certain") is True and row.get("count_certain") is True
                     and type(row.get("quantity")) is int and row["quantity"] == 1
                     and bool(row.get("evidence", "").strip()) and _valid_box(row.get("source_box")))
+
+        # ── Visual-candidate path for no-SKU-label products ──────────────────
+        # Accepted when:
+        #   1. The catalog product has no visible SKU label.
+        #   2. Muse reported visual_candidate_product_id matching this product.
+        #   3. Muse reported a non-empty visual_evidence description.
+        #   4. Muse reported a non-empty evidence/reasoning text.
+        #   5. A valid source_box was supplied so we can IoU-match SAM regions.
+        #   6. quantity == 1 (per-unit only).
+        visual_eligible = (not eligible and provider_ok and product is not None
+                           and no_sku
+                           and visual_cand == product_id
+                           and bool(row.get("visual_evidence", "").strip())
+                           and bool(row.get("evidence", "").strip())
+                           and _valid_box(row.get("source_box"))
+                           and type(row.get("quantity")) is int and row.get("quantity") == 1)
+
         matches = []
         if eligible:
             for region in regions:
                 if region["candidate_product_id"] != product_id or _iou(row["source_box"], region["box"]) < 0.5:
+                    continue
+                conflicts = any(other["id"] != region["id"] and other["candidate_product_id"] != product_id
+                                and _iou(region["box"], other["box"]) >= 0.5 for other in regions)
+                if not conflicts:
+                    matches.append(region["id"])
+        elif visual_eligible:
+            # For visual-candidate matching the region must have been prompted with
+            # this product's candidate id (from the SAM run).
+            for region in regions:
+                if region["candidate_product_id"] != product_id:
+                    continue
+                if _iou(row["source_box"], region["box"]) < 0.5:
                     continue
                 conflicts = any(other["id"] != region["id"] and other["candidate_product_id"] != product_id
                                 and _iou(region["box"], other["box"]) >= 0.5 for other in regions)
@@ -93,11 +143,19 @@ def ground_observations(observations: list[dict], regions: list[dict], products:
     for row, region_id in zip(observations, proposed):
         accepted = region_id is not None and claims[region_id] == 1
         product = catalog.get(row.get("product_id"))
+        no_sku = product is not None and _no_sku_label(product)
+        # Build evidence text; annotate visual-only matches for transparency.
+        evidence_text = row.get("evidence", "")
+        if accepted and no_sku and not (row.get("label_text", "").strip() == (product["sku"] if product else "")):
+            visual_note = f"[visual-only: no SKU label on product] {evidence_text}".strip()
+        else:
+            visual_note = evidence_text
         result = {**row, "sku": product["sku"] if product else None,
                   "identification_status": "MATCHED" if accepted else "UNCERTAIN" if product else "UNIDENTIFIED",
                   "evidence_region_ids": [region_id] if accepted else [],
                   "identity_certain": accepted, "count_certain": accepted,
-                  "quantity": 1 if accepted else None}
+                  "quantity": 1 if accepted else None,
+                  "evidence": visual_note}
         if accepted:
             indexed_regions[region_id]["product_id"] = row["product_id"]
         grounded.append(result)

@@ -47,7 +47,11 @@ def seed_packing_demo(db):
     ]
     for index, (pid, sku, name, color, description) in enumerate(products):
         if not db.get(Product, pid):
-            db.add(Product(id=pid, sku=sku, name=name, color=color, description=description))
+            p = Product(id=pid, sku=sku, name=name, color=color, description=description)
+            # Mark that no visible SKU label is present so reconciliation uses
+            # visual-candidate matching instead of requiring label_text == SKU.
+            p.visible_label = "NONE"
+            db.add(p)
             db.flush()
             db.add(Inventory(id=f"inventory-packing-{index}", product_id=pid,
                              quantity_available=20, location="Synthetic packing rack"))

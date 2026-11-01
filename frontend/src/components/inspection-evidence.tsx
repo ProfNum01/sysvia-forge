@@ -163,8 +163,9 @@ export function EvidenceViewer({
             <Focus size={16} />
           </Button>
           <Button
-            variant="outline"
+            variant={overlays ? "inspect" : "outline"}
             size="sm"
+            className="viewer-toggle-btn"
             aria-pressed={overlays}
             disabled={!dimensionsKnown || !regions.length}
             onClick={() => setOverlays((value) => !value)}
@@ -174,7 +175,7 @@ export function EvidenceViewer({
             ) : (
               <EyeOff size={14} aria-hidden="true" />
             )}
-            {overlays ? "Hide overlays" : "Show overlays"}
+            {overlays ? "Overlays active" : "Show overlays"}
           </Button>
         </div>
       </div>

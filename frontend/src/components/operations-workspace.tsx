@@ -212,7 +212,8 @@ export function RecordedTimeline({
         <div className="timeline-filter-bar" role="toolbar" aria-label="Event category filter">
           <button
             type="button"
-            className={`timeline-filter-pill ${filter === "ALL" ? "active" : ""}`}
+            data-category="ALL"
+            className={`timeline-filter-pill ${filter === "ALL" ? "active is-active" : ""}`}
             onClick={() => setFilter("ALL")}
           >
             All ({events.length})
@@ -220,7 +221,8 @@ export function RecordedTimeline({
           {toolCount > 0 && (
             <button
               type="button"
-              className={`timeline-filter-pill ${filter === "TOOL" ? "active" : ""}`}
+              data-category="TOOL"
+              className={`timeline-filter-pill ${filter === "TOOL" ? "active is-active" : ""}`}
               onClick={() => setFilter("TOOL")}
             >
               Tools ({toolCount})
@@ -229,7 +231,8 @@ export function RecordedTimeline({
           {lifecycleCount > 0 && (
             <button
               type="button"
-              className={`timeline-filter-pill ${filter === "LIFECYCLE" ? "active" : ""}`}
+              data-category="LIFECYCLE"
+              className={`timeline-filter-pill ${filter === "LIFECYCLE" ? "active is-active" : ""}`}
               onClick={() => setFilter("LIFECYCLE")}
             >
               Lifecycle ({lifecycleCount})
@@ -238,7 +241,8 @@ export function RecordedTimeline({
           {actionCount > 0 && (
             <button
               type="button"
-              className={`timeline-filter-pill ${filter === "ACTION" ? "active" : ""}`}
+              data-category="ACTION"
+              className={`timeline-filter-pill ${filter === "ACTION" ? "active is-active" : ""}`}
               onClick={() => setFilter("ACTION")}
             >
               Actions ({actionCount})

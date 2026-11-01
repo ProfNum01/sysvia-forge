@@ -36,6 +36,7 @@ import {
   CircleAlert,
   CircleCheck,
   Camera,
+  Clock,
   Clock3,
   Database,
   Presentation,
@@ -44,11 +45,13 @@ import {
   Focus,
   GitBranch,
   ImagePlus,
+  Layers,
   LayoutDashboard,
   LoaderCircle,
   LockKeyhole,
   Menu,
   Package,
+  PackageCheck,
   RefreshCw,
   ScanLine,
   Search,
@@ -779,23 +782,29 @@ function Orders() {
           </span>
         }
       />
-      <div className="orders-filter-bar">
+      <div className="orders-filter-bar" role="toolbar" aria-label="Filter orders by verification status">
         {[
-          { key: "ALL", label: "All Orders", count: rows.length },
-          { key: "PENDING", label: "Awaiting Inspection", count: rows.filter(o => o.status === "PENDING" || o.status === "PENDING_INSPECTION").length },
-          { key: "HELD", label: "On Hold", count: rows.filter(o => o.status === "HELD" || o.shipping_status === "HELD").length },
-          { key: "VERIFIED", label: "Verified Reality", count: rows.filter(o => o.status === "VERIFIED").length },
-        ].map(filter => (
-          <button
-            key={filter.key}
-            type="button"
-            className={`filter-chip ${statusFilter === filter.key ? "active" : ""}`}
-            onClick={() => setStatusFilter(filter.key)}
-          >
-            <span>{filter.label}</span>
-            <small>{filter.count}</small>
-          </button>
-        ))}
+          { key: "ALL", label: "All Orders", icon: Layers, count: rows.length },
+          { key: "PENDING", label: "Awaiting Inspection", icon: Clock, count: rows.filter(o => o.status === "PENDING" || o.status === "PENDING_INSPECTION").length },
+          { key: "HELD", label: "On Hold", icon: ShieldAlert, count: rows.filter(o => o.status === "HELD" || o.shipping_status === "HELD").length },
+          { key: "VERIFIED", label: "Verified Reality", icon: CheckCircle2, count: rows.filter(o => o.status === "VERIFIED").length },
+        ].map(filter => {
+          const Icon = filter.icon;
+          const isActive = statusFilter === filter.key;
+          return (
+            <button
+              key={filter.key}
+              type="button"
+              data-status={filter.key}
+              className={`filter-chip ${isActive ? "active is-active" : ""}`}
+              onClick={() => setStatusFilter(filter.key)}
+            >
+              <Icon size={13} aria-hidden="true" />
+              <span>{filter.label}</span>
+              <span className="filter-chip-count">{filter.count}</span>
+            </button>
+          );
+        })}
       </div>
       <Panel
         title="Order workspace"
@@ -873,7 +882,7 @@ function Orders() {
                               asChild
                               variant="inspect"
                               size="sm"
-                              className="btn-order-action"
+                              className="btn-order-action action-inspect"
                             >
                               <Link to={inspectionHref(o)}>
                                 <ScanLine size={13} aria-hidden="true" />
@@ -890,7 +899,7 @@ function Orders() {
                               asChild
                               variant="warning"
                               size="sm"
-                              className="btn-order-action"
+                              className="btn-order-action action-review"
                             >
                               <Link to={inspectionHref(o)}>
                                 <AlertTriangle size={13} aria-hidden="true" />
@@ -907,7 +916,7 @@ function Orders() {
                               asChild
                               variant="destructive"
                               size="sm"
-                              className="btn-order-action"
+                              className="btn-order-action action-hold"
                             >
                               <Link to={inspectionHref(o)}>
                                 <ShieldAlert size={13} aria-hidden="true" />
@@ -924,7 +933,7 @@ function Orders() {
                               asChild
                               variant="success"
                               size="sm"
-                              className="btn-order-action"
+                              className="btn-order-action action-verified"
                             >
                               <Link to={inspectionHref(o)}>
                                 <CheckCircle2 size={13} aria-hidden="true" />
@@ -940,7 +949,7 @@ function Orders() {
                             asChild
                             variant="outline"
                             size="sm"
-                            className="btn-order-action"
+                            className="btn-order-action action-view"
                           >
                             <Link to={inspectionHref(o)}>
                               <span>View Inspection</span>
@@ -2109,18 +2118,22 @@ function VerificationComparison({ inspection }: { inspection: Inspection }) {
                   {status.data.shipping_status === "NOT_READY" && (
                     <Button
                       size="sm"
+                      variant="success"
                       disabled={!token || shippingTransition.isPending}
                       onClick={() => shippingTransition.mutate("READY_TO_SHIP")}
                     >
+                      <CheckCircle2 size={14} aria-hidden="true" />
                       Authorize shipping (READY TO SHIP)
                     </Button>
                   )}
                   {status.data.shipping_status === "READY_TO_SHIP" && (
                     <Button
                       size="sm"
+                      variant="primary"
                       disabled={!token || shippingTransition.isPending}
                       onClick={() => shippingTransition.mutate("SHIPPED")}
                     >
+                      <PackageCheck size={14} aria-hidden="true" />
                       Confirm order dispatch (SHIPPED)
                     </Button>
                   )}

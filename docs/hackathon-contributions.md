@@ -1,5 +1,20 @@
 # Hackathon contributions
 
+## 2026-11-01 — Comprehensive semantic button differentiation across entire interface
+
+- Redesigned visual button hierarchy across the application to eliminate indistinguishable dark/outline buttons.
+- Orders workspace:
+  - Differentiated the filter bar (`.orders-filter-bar`) by introducing unique semantic chromatic styles, glowing active states, and distinct SVG icons (`Layers` for All Orders in electric blue, `Clock` for Awaiting Inspection in luminous cyan, `ShieldAlert` for On Hold in crimson, and `CheckCircle2` for Verified Reality in emerald).
+  - Re-engineered table row action buttons with high-contrast dedicated variant styles: `Inspect Now` (`action-inspect`, cyan gradient), `Review Issues` (`action-review`, warm amber gradient), `Investigate Hold` (`action-hold`, crimson gradient), and `Verified Match` (`action-verified`, emerald gradient).
+  - Styled `Synthetic seed data` as an informational metadata pill rather than looking like an interactive or disabled button.
+- Demo Workspace:
+  - Differentiated action buttons so they are no longer all identical outline variants: "Open inspection evidence" (`variant="primary"`), "Use in inspection" (`variant="inspect"`), and "Set token to use" (`variant="warning"`).
+- Evidence Viewer & Operations:
+  - Enhanced viewer zoom controls with distinct tactile button borders, and transformed the Overlays toggle into an active cyan button (`variant="inspect"`) when active.
+  - Added semantic styling to timeline filter pills (`data-category`) across ALL, TOOL, LIFECYCLE, and ACTION.
+  - Differentiated shipping transition buttons (`READY_TO_SHIP` in success emerald, `SHIPPED` in primary blue).
+- Verification: 24 frontend tests passed; 158 backend tests passed; Vite TypeScript production build succeeded with 0 errors.
+
 ## 2026-11-01 — Claude synthetic live inspection and review agent
 
 - Diagnosed the Claude catalog's SAM prompt as a provenance sentence rather than a short object phrase. Added a failing provider test, then sent the registered product's noun phrase to SAM for this catalog. No SKU, count, expected quantity, or discrepancy was injected into model results.

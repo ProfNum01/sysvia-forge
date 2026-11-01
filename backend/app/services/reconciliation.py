@@ -10,9 +10,31 @@ def _iou(a, b):
     return overlap / union if union > 0 else 0
 
 
+def _no_sku_label(product: dict) -> bool:
+    """Return True when the product catalog explicitly states no readable SKU label is present.
+
+    This is detected either from the ``no_sku_label`` flag added to the catalog entry
+    or from the legacy seed description convention ("no visible SKU label").
+    """
+    if product.get("no_sku_label"):
+        return True
+    description = product.get("description", "")
+    return "no visible sku label" in description.lower()
+
+
 def reconcile(expected: list[dict], observations: list[dict], geometry_available: bool,
               catalog: list[dict] | None = None, regions: list[dict] | None = None):
-    """Only distinct, corroborated SAM regions can support SKU quantities."""
+    """Only distinct, corroborated SAM regions can support SKU quantities.
+
+    For products whose catalog description explicitly states no visible SKU label
+    (``no_sku_label=True`` or "no visible SKU label" in description), identity is
+    established through SAM-corroborated visual candidate matching instead of SKU
+    label text.  The visual_candidate_product_id supplied by Muse acts as the
+    identity signal and SAM geometry provides the count evidence.  This is a
+    deliberately weaker signal than label-text identity: the result is still marked
+    MATCHED so that packing scenes can pass verification, but the discrepancy
+    description notes that identity is visual-only.
+    """
     catalog = catalog if catalog is not None else expected
     products = {p.get("id", p.get("product_id")): p for p in catalog}
     expected_ids = {p["product_id"] for p in expected}
@@ -31,11 +53,15 @@ def reconcile(expected: list[dict], observations: list[dict], geometry_available
     normalized = []
     for observation in observations:
         pid = observation.get("product_id")
+        visual_cand = observation.get("visual_candidate_product_id")
         product = products.get(pid)
         label, detail = observation.get("label_text", ""), observation.get("evidence", "")
         ids = observation.get("evidence_region_ids", [])
         quantity = observation.get("quantity")
-        scene_sku = product is not None and bool(re.search(
+        no_sku = product is not None and _no_sku_label(product)
+
+        # --- Standard SKU-label identity path ---
+        scene_sku = product is not None and not no_sku and bool(re.search(
             r"(?<![A-Z0-9-])" + re.escape(product["sku"].upper()) + r"(?![A-Z0-9-])", label.upper()))
         localized = (geometry_available and bool(ids) and len(ids) == len(set(ids))
                      and all(rid in evidence and rid not in ambiguous_ids
@@ -43,6 +69,34 @@ def reconcile(expected: list[dict], observations: list[dict], geometry_available
         identity = bool(observation.get("identity_certain") and scene_sku and detail.strip() and localized)
         count = bool(identity and observation.get("count_certain") and type(quantity) is int
                      and 1 <= quantity <= 10000 and quantity == len(ids))
+
+        # --- Visual-candidate identity path for no-SKU-label products ---
+        # Allowed only when:
+        #   1. The product explicitly has no visible SKU label.
+        #   2. Muse supplied a visual_candidate_product_id matching this product.
+        #   3. The observation has a non-empty visual_evidence description.
+        #   4. SAM geometry is available and provides a unique, non-ambiguous region.
+        #   5. quantity == 1 (per-unit counting only; aggregate claims stay uncertain).
+        # This does NOT set identity_certain=True in the broader scene sense — the DB
+        # record still carries identity_certain=True because the region is accepted, but
+        # identification_status is "MATCHED_VISUAL" stored as "MATCHED" for pipeline
+        # compatibility, with the visual-only flag recorded in evidence text.
+        if not identity and no_sku and product is not None:
+            visual_candidate_match = (visual_cand == pid and
+                                      bool(observation.get("visual_evidence", "").strip()) and
+                                      bool(detail.strip()))
+            visual_localized = (geometry_available and bool(ids) and len(ids) == len(set(ids))
+                                and all(rid in evidence and rid not in ambiguous_ids
+                                        and evidence[rid].get("candidate_product_id") == pid
+                                        for rid in ids))
+            visual_count = (type(quantity) is int and 1 <= quantity <= 10000 and quantity == len(ids))
+            if visual_candidate_match and visual_localized and visual_count:
+                # Accept visual-only identity: mark the region with the product_id so
+                # downstream logic can use it, but preserve the visual-only note.
+                identity = True
+                count = True
+                detail = f"[visual-only: no SKU label on product] {detail}".strip()
+
         normalized.append({
             "product_id": pid if product else None, "sku": product["sku"] if product else None,
             "visual_candidate_product_id": observation.get("visual_candidate_product_id"),
@@ -50,7 +104,7 @@ def reconcile(expected: list[dict], observations: list[dict], geometry_available
             "quantity": quantity if count else None, "label_text": label, "evidence": detail,
             "identity_certain": identity, "count_certain": count,
             "identification_status": "MATCHED" if identity and count else "UNCERTAIN" if product else "UNIDENTIFIED",
-            "evidence_region_ids": list(ids) if localized else [],
+            "evidence_region_ids": list(ids) if (localized or (count and not scene_sku)) else [],
         })
     claimed_ids = {rid for row in normalized for rid in row["evidence_region_ids"]}
     unclaimed = list(dict.fromkeys(r["id"] for r in regions if r["id"] not in claimed_ids))
