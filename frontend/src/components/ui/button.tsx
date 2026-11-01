@@ -6,11 +6,22 @@ const buttonVariants = cva("button", {
   variants: {
     variant: {
       default: "button-primary",
+      primary: "button-primary",
       outline: "button-outline",
       ghost: "button-ghost",
       destructive: "button-danger",
+      success: "button-success",
+      warning: "button-warning",
+      agent: "button-agent",
+      inspect: "button-inspect",
+      subtle: "button-subtle",
     },
-    size: { default: "", sm: "button-sm", icon: "button-icon" },
+    size: {
+      default: "",
+      sm: "button-sm",
+      lg: "button-lg",
+      icon: "button-icon",
+    },
   },
   defaultVariants: { variant: "default", size: "default" },
 });

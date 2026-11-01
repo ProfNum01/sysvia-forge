@@ -13,6 +13,7 @@ import {
   Routes,
   Link,
   useSearchParams,
+  useNavigate,
 } from "react-router-dom";
 import {
   QueryClient,
@@ -24,11 +25,13 @@ import {
 } from "@tanstack/react-query";
 import {
   Activity,
+  AlertTriangle,
   ArrowDownToLine,
   ArrowRight,
   Box,
   Check,
   CheckCheck,
+  CheckCircle2,
   ChevronRight,
   CircleAlert,
   CircleCheck,
@@ -38,6 +41,7 @@ import {
   Presentation,
   FileSearch,
   Fingerprint,
+  Focus,
   GitBranch,
   ImagePlus,
   LayoutDashboard,
@@ -49,6 +53,7 @@ import {
   ScanLine,
   Search,
   Settings2,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   Upload,
@@ -75,6 +80,7 @@ import {
   ProductComparison,
 } from "./components/inspection-evidence";
 import { DemoWorkspace } from "./components/demo-workspace";
+import { ResultModalProvider, useResultModal } from "./components/result-modal";
 import { api, formatTime, label, setApiOperatorToken } from "./lib/api";
 import { useProtectedImage } from "./lib/protected-image";
 import { validateImage } from "./lib/validation";
@@ -332,7 +338,6 @@ function Shell() {
               </span>
               <span className="nav-label">{n.label}</span>
               <span className={`nav-tag tag-${n.accent}`}>{n.tag}</span>
-              {n.to === "/inspection" && <span className="nav-dot" />}
             </NavLink>
           ))}
         </nav>
@@ -439,7 +444,7 @@ function Overview() {
         accent="blue"
         badge="SYSTEM OVERVIEW"
         action={
-          <Button asChild>
+          <Button asChild variant="inspect">
             <Link to="/inspection">
               <ScanLine size={17} aria-hidden="true" />
               New inspection
@@ -852,14 +857,98 @@ function Orders() {
                     </td>
                     <td className="muted">{label(o.preparation_status)}</td>
                     <td>
-                      <Button asChild variant="ghost" size="sm">
-                        <Link to={inspectionHref(o)}>
-                          {o.latest_inspection_id
-                            ? "View inspection"
-                            : "Inspect"}
-                          <ArrowRight size={14} aria-hidden="true" />
-                        </Link>
-                      </Button>
+                      {(() => {
+                        const isPending =
+                          !o.latest_inspection_id ||
+                          o.status === "PENDING" ||
+                          o.status === "PENDING_INSPECTION";
+                        const isNeedsReview = o.status === "NEEDS_REVIEW";
+                        const isHeld =
+                          o.status === "HELD" || o.shipping_status === "HELD";
+                        const isVerified = o.status === "VERIFIED";
+
+                        if (isPending) {
+                          return (
+                            <Button
+                              asChild
+                              variant="inspect"
+                              size="sm"
+                              className="btn-order-action"
+                            >
+                              <Link to={inspectionHref(o)}>
+                                <ScanLine size={13} aria-hidden="true" />
+                                <span>Inspect Now</span>
+                                <ArrowRight size={13} aria-hidden="true" />
+                              </Link>
+                            </Button>
+                          );
+                        }
+
+                        if (isNeedsReview) {
+                          return (
+                            <Button
+                              asChild
+                              variant="warning"
+                              size="sm"
+                              className="btn-order-action"
+                            >
+                              <Link to={inspectionHref(o)}>
+                                <AlertTriangle size={13} aria-hidden="true" />
+                                <span>Review Issues</span>
+                                <ArrowRight size={13} aria-hidden="true" />
+                              </Link>
+                            </Button>
+                          );
+                        }
+
+                        if (isHeld) {
+                          return (
+                            <Button
+                              asChild
+                              variant="destructive"
+                              size="sm"
+                              className="btn-order-action"
+                            >
+                              <Link to={inspectionHref(o)}>
+                                <ShieldAlert size={13} aria-hidden="true" />
+                                <span>Investigate Hold</span>
+                                <ArrowRight size={13} aria-hidden="true" />
+                              </Link>
+                            </Button>
+                          );
+                        }
+
+                        if (isVerified) {
+                          return (
+                            <Button
+                              asChild
+                              variant="success"
+                              size="sm"
+                              className="btn-order-action"
+                            >
+                              <Link to={inspectionHref(o)}>
+                                <CheckCircle2 size={13} aria-hidden="true" />
+                                <span>Verified Match</span>
+                                <ArrowRight size={13} aria-hidden="true" />
+                              </Link>
+                            </Button>
+                          );
+                        }
+
+                        return (
+                          <Button
+                            asChild
+                            variant="outline"
+                            size="sm"
+                            className="btn-order-action"
+                          >
+                            <Link to={inspectionHref(o)}>
+                              <span>View Inspection</span>
+                              <ArrowRight size={13} aria-hidden="true" />
+                            </Link>
+                          </Button>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))}
@@ -978,6 +1067,8 @@ function InspectionTable({ inspections }: { inspections: Inspection[] }) {
 }
 function InspectionPage() {
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { showInspectionResult } = useResultModal();
   const id = params.get("id");
   const demoAsset = params.get("demo");
   const { token } = useContext(TokenContext);
@@ -1099,6 +1190,9 @@ function InspectionPage() {
       qc.invalidateQueries({ queryKey: ["summary"] });
       qc.invalidateQueries({ queryKey: ["inspections"] });
       qc.invalidateQueries({ queryKey: ["orders"] });
+      showInspectionResult(data, selected?.reference, () => {
+        navigate(`/operations?inspection=${encodeURIComponent(data.id)}`);
+      });
     },
     onSettled: () => {
       setAnalysisRequested(false);
@@ -1175,6 +1269,47 @@ function InspectionPage() {
           )
         }
       />
+      {current && current.status !== "UPLOADED" && current.status !== "ANALYZING" && (
+        <div
+          className={`inspection-result-banner ${current.status === "VERIFIED" ? "banner-verified" : "banner-needs-review"}`}
+        >
+          <div className="banner-content">
+            <span className="banner-icon">
+              {current.status === "VERIFIED" ? (
+                <Check size={20} aria-hidden="true" />
+              ) : (
+                <AlertTriangle size={20} aria-hidden="true" />
+              )}
+            </span>
+            <div>
+              <strong>
+                {current.status === "VERIFIED"
+                  ? "فحص مطابق ومعتمد (VERIFIED)"
+                  : current.status === "HELD"
+                    ? "الفحص معلق لوجود تباينات (HELD)"
+                    : "الفحص يحتاج مراجعة بشرية (NEEDS REVIEW)"}
+              </strong>
+              <p>
+                {current.status === "VERIFIED"
+                  ? "كافة متطلبات الطلب تم التحقق منها ومطابقتها حتمياً في الأدلة المرئية."
+                  : `رُصد ${current.discrepancies.length} تباين(ات) بين المانيفست والصورة. انقر لعرض تفاصيل التشخيص بالبوب-أب.`}
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              showInspectionResult(current, selected?.reference, () => {
+                navigate(`/operations?inspection=${encodeURIComponent(current.id)}`);
+              });
+            }}
+          >
+            <CircleAlert size={14} aria-hidden="true" />
+            عرض التشخيص المفصل (Pop-up)
+          </Button>
+        </div>
+      )}
       <div className="inspection-layout">
         <div>
           <Panel
@@ -1342,6 +1477,26 @@ function InspectionPage() {
                     validation.
                   </p>
                 </div>
+                <div className="camera-angle-callout" role="note" aria-label="Camera angle requirements">
+                  <div className="camera-angle-header">
+                    <Focus size={15} aria-hidden="true" />
+                    <span>Camera Angle &amp; Staging Requirements</span>
+                  </div>
+                  <ul className="camera-angle-checklist">
+                    <li>
+                      <strong>60°–90° Overhead Angle:</strong> Position camera directly above the packing station to capture the full surface without perspective distortion.
+                    </li>
+                    <li>
+                      <strong>Labels Facing Lens:</strong> Turn alphanumeric SKU labels upward so they are crisp, sharp, and directly readable by the vision model.
+                    </li>
+                    <li>
+                      <strong>Zero Stacking (Separated Units):</strong> Maintain space between packages. Overlapping boxes (IoU &ge; 0.5) trigger ambiguity holds.
+                    </li>
+                    <li>
+                      <strong>Diffused Light / No Glare:</strong> Ensure uniform illumination; tilt slightly or soften lighting to prevent specular reflection over label text.
+                    </li>
+                  </ul>
+                </div>
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
@@ -1479,6 +1634,7 @@ function InspectionPage() {
                   )}
                   <div className="button-row">
                     <Button
+                      variant="inspect"
                       onClick={() => analyze.mutate()}
                       disabled={
                         !token ||
@@ -1516,6 +1672,20 @@ function InspectionPage() {
                       <ImagePlus size={16} aria-hidden="true" />
                       Upload new evidence
                     </Button>
+                    {current.status !== "UPLOADED" && current.status !== "ANALYZING" && (
+                      <Button
+                        type="button"
+                        variant="warning"
+                        onClick={() => {
+                          showInspectionResult(current, selected?.reference, () => {
+                            navigate(`/operations?inspection=${encodeURIComponent(current.id)}`);
+                          });
+                        }}
+                      >
+                        <CircleAlert size={15} aria-hidden="true" />
+                        تشخيص النتيجة (Show Diagnosis Pop-up)
+                      </Button>
+                    )}
                   </div>
                   <p className="form-hint">
                     Explicitly starts paid Meta inference: Muse visual analysis
@@ -1646,20 +1816,24 @@ function InspectionPage() {
             <ul>
               <li>
                 <Check size={14} aria-hidden="true" />
-                Show all items and readable labels.
+                60°–90° overhead top-down camera angle.
               </li>
               <li>
                 <Check size={14} aria-hidden="true" />
-                Use good lighting without overlap.
+                Show all items flat without overlap (IoU &lt; 0.5).
               </li>
               <li>
                 <Check size={14} aria-hidden="true" />
-                Uncertain counts remain in review.
+                SKU labels facing camera and clearly legible.
+              </li>
+              <li>
+                <Check size={14} aria-hidden="true" />
+                Diffused lighting without specular glare reflections.
               </li>
             </ul>
             <p>
-              “Not observed” never proves “absent.” No exact identity is
-              asserted from ambiguous evidence.
+              “Not observed” never proves “absent.” Overlapping items (IoU ≥ 0.5)
+              or unreadable labels strictly remain in review.
             </p>
           </div>
         </div>
@@ -2279,7 +2453,7 @@ function Settings() {
               {token && (
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="destructive"
                   onClick={() => {
                     setToken("");
                     setSaved(false);
@@ -2324,7 +2498,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <TokenProvider>
         <BrowserRouter>
-          <Shell />
+          <ResultModalProvider>
+            <Shell />
+          </ResultModalProvider>
         </BrowserRouter>
       </TokenProvider>
     </QueryClientProvider>

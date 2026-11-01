@@ -327,7 +327,7 @@ export function ProductComparison({
           {rows.map((row) => (
             <tr
               key={row.product_id}
-              className={`${row.evidence_region_ids.some((id) => selectedRegionIds.includes(id)) ? "comparison-selected" : ""} ${row.status === "MISMATCH_DETECTED" || (row.difference != null && row.difference !== 0) ? "comparison-discrepancy" : ""}`}
+              className={`${row.evidence_region_ids.some((id) => selectedRegionIds.includes(id)) ? "comparison-selected" : ""} ${row.status !== "MATCHED" ? "comparison-discrepancy row-discrepancy-pulse" : "row-matched"}`}
             >
               <td>
                 <strong>{row.name}</strong>

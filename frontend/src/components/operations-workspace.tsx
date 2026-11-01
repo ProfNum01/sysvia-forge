@@ -36,6 +36,7 @@ import {
   operationKeys,
 } from "../lib/operations";
 import { comparisonValue } from "../lib/evidence";
+import { useResultModal } from "./result-modal";
 import type { Action, Audit, Inspection, Order, VerificationStatus } from "../types";
 
 function Badge({ value }: { value: string }) {
@@ -116,13 +117,18 @@ export function EvidenceReferences({
           photo_id: inspection?.photo_id,
           order_id: orderId,
         });
+        const [kind, ...rest] = reference.split(":");
+        const rawId = rest.join(":");
+        const shortId = rawId.length > 14 ? `${rawId.slice(0, 8)}…${rawId.slice(-4)}` : rawId;
+        const displayLabel = rawId ? `${kind}: ${shortId}` : reference;
+
         return href && inspection ? (
-          <Link key={`${reference}-${index}`} to={href}>
-            {reference}
+          <Link key={`${reference}-${index}`} to={href} title={reference}>
+            <span>{displayLabel}</span>
             <ArrowRight size={11} aria-hidden="true" />
           </Link>
         ) : (
-          <span key={`${reference}-${index}`}>{reference}</span>
+          <span key={`${reference}-${index}`} title={reference}>{displayLabel}</span>
         );
       })}
     </div>
@@ -142,29 +148,128 @@ export function RecordedTimeline({
   }[];
   emptyMessage?: string;
 }) {
+  const [filter, setFilter] = useState<"ALL" | "TOOL" | "LIFECYCLE" | "ACTION" | "EVIDENCE">("ALL");
+
   if (!events.length)
     return <p className="operations-empty-copy">{emptyMessage}</p>;
+
+  const categorized = events.map((event) => {
+    let cat: "TOOL" | "LIFECYCLE" | "ACTION" | "EVIDENCE" | "ERROR" = "EVIDENCE";
+    let badge = "Evidence";
+    let IconComponent = Activity;
+    let className = "event-cat-evidence";
+
+    if (
+      event.actor === "meta-read-tool" ||
+      event.event_type.startsWith("get_") ||
+      event.event_type.startsWith("TOOL_")
+    ) {
+      cat = "TOOL";
+      badge = "Agent Tool";
+      IconComponent = Database;
+      className = "event-cat-tool";
+    } else if (
+      event.event_type.includes("INVESTIGATION_") ||
+      event.event_type.includes("ANALYSIS_")
+    ) {
+      cat = "LIFECYCLE";
+      badge = "Lifecycle";
+      IconComponent = Sparkles;
+      className = "event-cat-lifecycle";
+    } else if (
+      event.event_type.includes("ACTION_") ||
+      event.event_type.includes("APPROVAL_") ||
+      event.event_type.includes("TASK_") ||
+      event.event_type.includes("CONTROLLED_")
+    ) {
+      cat = "ACTION";
+      badge = "Action Gate";
+      IconComponent = ShieldCheck;
+      className = "event-cat-action";
+    } else if (
+      event.event_type.includes("ERROR") ||
+      event.event_type.includes("FAILED") ||
+      event.event_type.includes("BLOCKED")
+    ) {
+      cat = "ERROR";
+      badge = "Exception";
+      IconComponent = CircleAlert;
+      className = "event-cat-error";
+    }
+
+    return { event, cat, badge, IconComponent, className };
+  });
+
+  const toolCount = categorized.filter((c) => c.cat === "TOOL").length;
+  const lifecycleCount = categorized.filter((c) => c.cat === "LIFECYCLE").length;
+  const actionCount = categorized.filter((c) => c.cat === "ACTION").length;
+
+  const filtered = filter === "ALL" ? categorized : categorized.filter((c) => c.cat === filter);
+
   return (
-    <ol className="audit-list operations-timeline">
-      {events.map((event) => (
-        <li key={event.id} id={`audit-${event.id}`}>
-          <div className="audit-symbol">
-            <Activity size={14} aria-hidden="true" />
-          </div>
-          <div>
-            <strong>{label(event.event_type)}</strong>
-            <time dateTime={event.created_at}>
-              {formatTime(event.created_at)}
-              {event.actor ? ` · ${event.actor}` : ""}
-            </time>
-            <details>
-              <summary>Recorded details</summary>
-              <pre>{JSON.stringify(event.details, null, 2)}</pre>
-            </details>
-          </div>
-        </li>
-      ))}
-    </ol>
+    <div className="recorded-timeline-container">
+      {events.length > 3 && (
+        <div className="timeline-filter-bar" role="toolbar" aria-label="Event category filter">
+          <button
+            type="button"
+            className={`timeline-filter-pill ${filter === "ALL" ? "active" : ""}`}
+            onClick={() => setFilter("ALL")}
+          >
+            All ({events.length})
+          </button>
+          {toolCount > 0 && (
+            <button
+              type="button"
+              className={`timeline-filter-pill ${filter === "TOOL" ? "active" : ""}`}
+              onClick={() => setFilter("TOOL")}
+            >
+              Tools ({toolCount})
+            </button>
+          )}
+          {lifecycleCount > 0 && (
+            <button
+              type="button"
+              className={`timeline-filter-pill ${filter === "LIFECYCLE" ? "active" : ""}`}
+              onClick={() => setFilter("LIFECYCLE")}
+            >
+              Lifecycle ({lifecycleCount})
+            </button>
+          )}
+          {actionCount > 0 && (
+            <button
+              type="button"
+              className={`timeline-filter-pill ${filter === "ACTION" ? "active" : ""}`}
+              onClick={() => setFilter("ACTION")}
+            >
+              Actions ({actionCount})
+            </button>
+          )}
+        </div>
+      )}
+      <ol className="audit-list operations-timeline">
+        {filtered.map(({ event, badge, IconComponent, className }) => (
+          <li key={event.id} id={`audit-${event.id}`} className={`timeline-entry ${className}`}>
+            <div className={`audit-symbol ${className}`}>
+              <IconComponent size={14} aria-hidden="true" />
+            </div>
+            <div className="timeline-content">
+              <div className="timeline-header-row">
+                <span className="timeline-cat-badge">{badge}</span>
+                <strong>{label(event.event_type)}</strong>
+                <time dateTime={event.created_at}>
+                  {formatTime(event.created_at)}
+                  {event.actor ? ` · ${event.actor}` : ""}
+                </time>
+              </div>
+              <details className="timeline-details">
+                <summary>Recorded details</summary>
+                <pre>{JSON.stringify(event.details, null, 2)}</pre>
+              </details>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
@@ -193,25 +298,25 @@ export function ActiveInvestigationProgress({
     {
       id: "manifest",
       label: "Order Manifest",
-      desc: "Reading target SKUs & quantities",
+      desc: "Target SKUs & quantities",
       icon: Database,
     },
     {
       id: "muse",
       label: "Meta Muse Spark",
-      desc: "Reasoning over discrepancies",
+      desc: "Multimodal reasoning",
       icon: Sparkles,
     },
     {
       id: "tools",
       label: "Read-Tool Check",
-      desc: "Auditing stock & history ledger",
+      desc: "Auditing stock & history",
       icon: FileSearch,
     },
     {
       id: "proposal",
-      label: "Proposal Synthesizer",
-      desc: "Drafting supervisor action gate",
+      label: "Proposal Gate",
+      desc: "Drafting supervisor action",
       icon: ShieldCheck,
     },
   ];
@@ -255,7 +360,7 @@ export function ActiveInvestigationProgress({
       </div>
 
       <div
-        className="progress-bar"
+        className="progress-bar-track progress-bar-investigation"
         role="progressbar"
         aria-valuenow={progressPercent}
         aria-valuemin={0}
@@ -264,8 +369,9 @@ export function ActiveInvestigationProgress({
         <div
           className="progress-bar-fill progress-purple"
           style={{ width: `${progressPercent}%` }}
-        />
-        <div className="progress-bar-shimmer" />
+        >
+          <div className="progress-bar-shimmer" />
+        </div>
       </div>
 
       <div className="investigation-stepper-grid">
@@ -321,6 +427,7 @@ export function InvestigationCard({
   isCurrent: boolean;
 }) {
   const qc = useQueryClient();
+  const { showResult } = useResultModal();
   const inFlight = useIsMutating({ mutationKey: ["investigate", i.id] }) > 0;
   const mutation = useMutation({
     mutationKey: ["investigate", i.id],
@@ -335,6 +442,20 @@ export function InvestigationCard({
     onSuccess: (data) => {
       qc.setQueryData(["inspection", i.id], data);
       invalidateOperations(qc);
+      showResult({
+        type: "INVESTIGATION",
+        status: data.investigation_result?.decision ?? "COMPLETED",
+        title: "اكتمل التحقيق الذكي · AI Investigation Completed",
+        subtitle: `تم فحص الأدلة وتطبيق السياسة الحتمية (Order ${order?.reference ?? i.order_id})`,
+        diagnosis:
+          data.investigation_result?.summary ??
+          data.investigation ??
+          "تم استعلام أدوات القراءة وتسجيل النتائج وصياغة مقترحات الإجراءات التصحيحية المعتمدة.",
+        orderReference: order?.reference,
+        inspectionId: i.id,
+        orderId: i.order_id,
+        discrepancies: data.discrepancies,
+      });
     },
     onSettled: () => invalidateOperations(qc),
   });
@@ -373,21 +494,41 @@ export function InvestigationCard({
       <div className="investigation-context">
         <span>Inspection outcome</span>
         <Badge value={i.status} />
-        {i.reconciliation_status && <Badge value={i.reconciliation_status} />}
+        {i.reconciliation_status && i.reconciliation_status !== i.status && (
+          <Badge value={i.reconciliation_status} />
+        )}
       </div>
-      {!!i.discrepancies.length && <div className="investigation-context">
-        <span>Detected issues</span>
-        <strong>{[...new Set(i.discrepancies.map((item) => label(item.type)))].join(", ")}</strong>
-      </div>}
-      {verification.data && <div className="investigation-context">
-        <span>Verification eligibility</span>
-        <Badge value={verification.data.verification_status} />
-        <span>Shipping: {label(verification.data.shipping_status)}</span>
-        <span>Open physical tasks: {[...verification.data.picking_tasks, ...verification.data.removal_tasks]
-          .filter((task) => task.status !== "COMPLETED").length}</span>
-        <span>{verification.data.requires_reinspection ? "New evidence required" : "No reinspection pending"}</span>
-        <span>{verification.data.revision_current ? "Current order revision" : "Order revision changed"}</span>
-      </div>}
+      {!!i.discrepancies.length && (
+        <div className="investigation-context">
+          <span>Detected issues</span>
+          <strong>{[...new Set(i.discrepancies.map((item) => label(item.type)))].join(", ")}</strong>
+        </div>
+      )}
+      {verification.data && (
+        <div className="investigation-verification-meta">
+          <span className="verification-pill">
+            <span className="pill-label">Eligibility</span>
+            <Badge value={verification.data.verification_status} />
+          </span>
+          <span className="verification-pill">
+            <span className="pill-label">Shipping</span>
+            <strong>{label(verification.data.shipping_status)}</strong>
+          </span>
+          <span className="verification-pill">
+            <span className="pill-label">Tasks</span>
+            <strong>
+              {[...verification.data.picking_tasks, ...verification.data.removal_tasks]
+                .filter((task) => task.status !== "COMPLETED").length} open
+            </strong>
+          </span>
+          <span className={`verification-pill ${verification.data.requires_reinspection ? "pill-flag-warning" : "pill-flag-ok"}`}>
+            {verification.data.requires_reinspection ? "New evidence required" : "Evidence current"}
+          </span>
+          <span className="verification-pill">
+            {verification.data.revision_current ? "Revision Current" : "Revision Changed"}
+          </span>
+        </div>
+      )}
       {result?.decision && (
         <div className="investigation-decision">
           <span>Persisted decision</span>
@@ -501,6 +642,7 @@ export function InvestigationCard({
       <div className="button-row investigation-controls">
         {!["COMPLETED"].includes(status) && (
           <Button
+            variant={status === "FAILED" ? "warning" : "agent"}
             disabled={!token || !eligible || running}
             size="sm"
             onClick={() => mutation.mutate()}
@@ -564,6 +706,7 @@ export function CorrectiveActionCard({
   token: string;
 }) {
   const qc = useQueryClient();
+  const { showResult } = useResultModal();
   const [showReject, setShowReject] = useState(false);
   const [reason, setReason] = useState("");
   const [showHistory, setShowHistory] = useState(false);
@@ -590,9 +733,21 @@ export function CorrectiveActionCard({
             : {}),
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (_data, operation) => {
       setShowReject(false);
       invalidateOperations(qc);
+      showResult({
+        type: "ACTION",
+        status: operation.toUpperCase(),
+        title: `تم اعتماد الإجراء: ${label(a.type)}`,
+        subtitle: `حالة الإجراء: ${label(operation === "approve" ? "APPROVED" : operation === "reject" ? "REJECTED" : "EXECUTED")}`,
+        diagnosis:
+          operation === "execute"
+            ? "تم تنفيذ الإجراء الحتمي على الخادم بنجاح. تذكير أمني: إتمام المهمة الميدانية يتطلب صورة فوتوغرافية جديدة لإعادة الفحص والتوثيق البصري."
+            : "تم تسجيل قرار المشرف البشري في سجل التدقيق بنجاح.",
+        inspectionId: a.inspection_id,
+        orderId: a.order_id,
+      });
     },
     onSettled: () => invalidateOperations(qc),
   });
@@ -610,7 +765,7 @@ export function CorrectiveActionCard({
     physical.data?.removal_tasks.find((task) => task.id === taskId);
   const completePhysical = useMutation({
     mutationKey: ["physical-task", taskId],
-    mutationFn: () => api<{status: string}>(`/${physicalKind}-tasks/${taskId}/complete`, {
+    mutationFn: () => api<{ status: string }>(`/${physicalKind}-tasks/${taskId}/complete`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ idempotency_key: operationKeys.get(taskId ?? "", "complete") }),
@@ -692,6 +847,7 @@ export function CorrectiveActionCard({
       <div className="button-row">
         {controls.approve && (
           <Button
+            variant="success"
             size="sm"
             disabled={!token || inFlight || stale}
             onClick={() => mutation.mutate("approve")}
@@ -702,7 +858,7 @@ export function CorrectiveActionCard({
         )}
         {controls.reject && (
           <Button
-            variant="outline"
+            variant="destructive"
             size="sm"
             disabled={!token || inFlight || stale}
             onClick={() => setShowReject((value) => !value)}
@@ -713,6 +869,7 @@ export function CorrectiveActionCard({
         )}
         {controls.execute && (
           <Button
+            variant="primary"
             size="sm"
             disabled={!token || inFlight || stale}
             onClick={() => mutation.mutate("execute")}
@@ -843,10 +1000,12 @@ export function CorrectiveActionCard({
             )}
           {physicalTask?.status === "OPEN" && (
             <Button
+              variant="inspect"
               size="sm"
               disabled={!token || completePhysical.isPending}
               onClick={() => completePhysical.mutate()}
             >
+              <Check size={14} aria-hidden="true" />
               {completePhysical.isPending ? "Reporting completion..." : "Report physical task completed"}
             </Button>
           )}
@@ -858,7 +1017,7 @@ export function CorrectiveActionCard({
         </div>
       )}
       {["EXECUTED", "AWAITING_REINSPECTION"].includes(lifecycle) ||
-      a.status === "EXECUTED" ? (
+        a.status === "EXECUTED" ? (
         <div className="action-reinspection">
           <ShieldCheck size={15} aria-hidden="true" />
           <div>
@@ -913,11 +1072,11 @@ export function OperationsWorkspace({ token }: { token: string }) {
     queryFn: () => api<Inspection[]>("/inspections"),
     refetchInterval: (query) =>
       activeRequests > 0 ||
-      query.state.data?.some(
-        (i) =>
-          i.investigation_status === "RUNNING" ||
-          i.actions.some((a) => a.lifecycle_state === "EXECUTING"),
-      )
+        query.state.data?.some(
+          (i) =>
+            i.investigation_status === "RUNNING" ||
+            i.actions.some((a) => a.lifecycle_state === "EXECUTING"),
+        )
         ? 1500
         : false,
   });
@@ -953,7 +1112,7 @@ export function OperationsWorkspace({ token }: { token: string }) {
       (["NEEDS_REVIEW", "HELD"].includes(i.status) &&
         i.discrepancies.length > 0 &&
         orders.data?.find((o) => o.id === i.order_id)?.latest_inspection_id ===
-          i.id),
+        i.id),
   );
   return (
     <>

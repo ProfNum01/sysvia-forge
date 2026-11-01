@@ -144,3 +144,26 @@
   - Production build: `tsc -b && vite build` passed cleanly in 3.41s.
   - Backend and frontend daemons active and responding (HTTP 200).
 
+## 2026-11-01 — Interactive result pop-up modal, discrepancy highlighting & semantic button system
+
+- Created a unified `ResultModalProvider` and `ResultModalDialog` in `frontend/src/components/result-modal.tsx`:
+  - Automatically pops up immediately upon inspection completion, AI investigation completion, or corrective action state changes.
+  - Formulates a detailed, bilingual diagnosis ("تشخيص نتيجة الفحص") explaining the exact operational and visual reasons behind `NEEDS_REVIEW` (shortfall, unobserved products under strict policy, unconfirmed SKU labels) or `VERIFIED`.
+  - Embeds interactive before/after or manifest comparison with row-level discrepancy highlighting (`row-highlight-error`).
+  - Provides direct one-click action to launch AI investigation or authorize shipping directly from the pop-up.
+- System-Wide Semantic Button Palette:
+  - Expanded `frontend/src/components/ui/button.tsx` and `frontend/src/index.css` with 9 distinct, purpose-driven button variants:
+    - `inspect` (Luminous Cyan gradient) for perception/inspection actions ("Inspect Now", "Start AI Inspection").
+    - `warning` (Warm Amber tint & glow) for issue review ("Review Issues", "Show Diagnosis Pop-up").
+    - `destructive` (Rose/Crimson gradient) for hold investigation and rejections ("Investigate Hold", "Reject", "Clear Token").
+    - `success` (Emerald Green gradient) for deterministic verifications and approvals ("Verified Match", "Approve", "Authorize Shipping").
+    - `agent` (Majestic Purple gradient) for AI operations ("Start AI Investigation").
+    - `primary` (Electric Blue) for standard system mutations ("Execute Approved Action", "Save Inspection Image").
+    - `outline`, `ghost`, and `subtle` for contextual low-emphasis actions.
+  - Upgraded Orders table action column so every row features a distinct, color-coded, icon-backed button corresponding directly to its status.
+- Resolved Visual Overlap:
+  - Removed duplicate `nav-dot` from sidebar to prevent collision with `VISION` tag.
+  - Removed heavy left border from `.page-heading` and added proper spacing to prevent line congestion.
+  - Enabled smooth vertical scrolling on the sidebar.
+
+
