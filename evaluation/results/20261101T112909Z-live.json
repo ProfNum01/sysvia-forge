@@ -1,0 +1,139 @@
+{
+  "dataset_id": "synthetic-packing-existing-v1",
+  "mode": "LIVE_META",
+  "created_at": "2026-11-01T11:29:09.349014+00:00",
+  "cases_available": 1,
+  "live_inspection_attempts": 1,
+  "metrics": {
+    "sample_size": 1,
+    "provenance_counts": {
+      "SYNTHETIC": 1
+    },
+    "false_verification_count": 0,
+    "false_verification_rate_percent": 0.0,
+    "human_review_count": 1,
+    "human_review_rate_percent": 100.0,
+    "unauthorized_execution_count": 0,
+    "incorrect_verification_count": 0,
+    "successful_verification_count": 0,
+    "unresolved_discrepancy_count": 1,
+    "stale_order_rejection_count": null,
+    "shipping_safety_violation_count": 0,
+    "agent_sample_size": 1,
+    "valid_action_proposal_rate_percent": 100.0,
+    "tool_execution_success_rate_percent": 100.0,
+    "incorrect_action_proposal_count": 0,
+    "average_investigation_duration_seconds": 21.524,
+    "product_identification_accuracy_percent": null,
+    "product_identification_accuracy_note": "No independent region-level SKU annotations; not measured.",
+    "quantity_agreement_sample_size": 0,
+    "quantity_agreement_percent": null,
+    "discrepancy_detection_sample_size": 0,
+    "uncertain_cases_excluded_from_detection_metrics": 1,
+    "discrepancy_detection_precision_percent": null,
+    "discrepancy_detection_recall_percent": null
+  },
+  "cases": [
+    {
+      "scenario_id": "packing-missing-before",
+      "provenance": "SYNTHETIC",
+      "evidence": "evaluation/datasets/synthetic-packing/01_missing_product_before.png",
+      "evidence_sha256": "d1804a2c22db5ad76426bfc5d3a6573ffe66c855678642b0be0da8973b4b9bfc",
+      "ground_truth_quantities": {
+        "packing-blue-box": 2,
+        "packing-red-can": 1,
+        "packing-yellow-pouch": 0
+      },
+      "ground_truth_limitations": "Visible shape and color only; no readable SKU labels.",
+      "expected_discrepancy": [
+        "MISSING_OR_REVIEW"
+      ],
+      "expected_agent_behavior": "REQUEST_REVIEW_OR_NEW_IMAGE",
+      "expected_verification_policy": "NEEDS_REVIEW",
+      "live_attempted": true,
+      "inspection_id": "a977697e-34cf-4ae1-8128-396132aacf88",
+      "inspection_status": "NEEDS_REVIEW",
+      "actual_discrepancies": [
+        "NOT_OBSERVED",
+        "UNIDENTIFIED"
+      ],
+      "comparison": [
+        {
+          "product_id": "packing-blue-box",
+          "sku": "PACK-BLUE-BOX",
+          "name": "Blue rectangular box",
+          "required_quantity": 2,
+          "observed_quantity": null,
+          "difference": null,
+          "status": "NOT_OBSERVED",
+          "evidence_region_ids": []
+        },
+        {
+          "product_id": "packing-red-can",
+          "sku": "PACK-RED-CAN",
+          "name": "Red cylindrical can",
+          "required_quantity": 1,
+          "observed_quantity": null,
+          "difference": null,
+          "status": "NOT_OBSERVED",
+          "evidence_region_ids": []
+        },
+        {
+          "product_id": "packing-yellow-pouch",
+          "sku": "PACK-YELLOW-POUCH",
+          "name": "Yellow pouch",
+          "required_quantity": 1,
+          "observed_quantity": null,
+          "difference": null,
+          "status": "NOT_OBSERVED",
+          "evidence_region_ids": []
+        }
+      ],
+      "shipping_status": "HELD",
+      "models": {
+        "muse_model": "muse-spark-1.3",
+        "muse_usage": {
+          "prompt_tokens": 4024,
+          "completion_tokens": 2100,
+          "total_tokens": 6124
+        },
+        "muse_latency_ms": 11937,
+        "sam_latency_ms": 4103,
+        "sam_model": "sam-3.1",
+        "total_latency_ms": 19253,
+        "muse_http_status": 200,
+        "sam_http_status": 200,
+        "sam_requests": 1,
+        "analysis_version": 2
+      },
+      "analysis_http_status": 200,
+      "outcome": "NEEDS_HUMAN_REVIEW",
+      "investigation_seconds": 21.524,
+      "investigation_attempted": true,
+      "investigation_http_status": 200,
+      "decision": "HUMAN_REVIEW_REQUIRED",
+      "decision_valid": true,
+      "tool_called": 5,
+      "tool_completed": 5,
+      "agent_model_requests": 4,
+      "executed_tools": [
+        "get_order_details",
+        "get_inspection_results",
+        "get_pending_actions",
+        "get_verification_history",
+        "get_order_history"
+      ],
+      "failed_safely": true,
+      "failure_analysis": {
+        "evidence": "evaluation/datasets/synthetic-packing/01_missing_product_before.png",
+        "expected_outcome": "NEEDS_REVIEW",
+        "actual_outcome": "NEEDS_HUMAN_REVIEW",
+        "failure_category": "PERCEPTION_UNCERTAIN",
+        "service": "muse-spark-1.3 / sam-3.1",
+        "stage": "perception",
+        "failed_safely": true,
+        "suggested_change": "Capture clearer evidence and inspect the unmatched regions."
+      }
+    }
+  ]
+}

@@ -412,9 +412,11 @@ function Shell() {
   );
 }
 function Overview() {
+  const { token } = useContext(TokenContext);
   const q = useQuery({
     queryKey: ["summary"],
     queryFn: () => api<Summary>("/dashboard/summary"),
+    enabled: !!token,
   });
   const data = q.data;
   return (
@@ -441,7 +443,9 @@ function Overview() {
         </span>
         <span className="notice-tag">SANDBOX DATA</span>
       </div>
-      {q.isPending ? (
+      {!token ? (
+        <NoTokenState />
+      ) : q.isPending ? (
         <Loading />
       ) : q.isError ? (
         <ErrorState error={q.error} retry={() => q.refetch()} />
@@ -700,11 +704,28 @@ function Overview() {
     </>
   );
 }
+function NoTokenState() {
+  return (
+    <div className="no-token-state">
+      <LockKeyhole size={32} aria-hidden="true" />
+      <h3>Token required to load this workspace</h3>
+      <p>Set your operator session token in Settings to continue.</p>
+      <Button asChild>
+        <Link to="/settings">
+          <Settings2 size={15} aria-hidden="true" />
+          Open Settings
+        </Link>
+      </Button>
+    </div>
+  );
+}
 function Orders() {
+  const { token } = useContext(TokenContext);
   const [orderParams] = useSearchParams();
   const q = useQuery({
     queryKey: ["orders"],
     queryFn: () => api<Order[]>("/orders"),
+    enabled: !!token,
   });
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(
@@ -745,7 +766,9 @@ function Orders() {
           </div>
         }
       >
-        {q.isPending ? (
+        {!token ? (
+          <NoTokenState />
+        ) : q.isPending ? (
           <Loading />
         ) : q.isError ? (
           <ErrorState error={q.error} retry={() => q.refetch()} />
@@ -1326,6 +1349,15 @@ function InspectionPage() {
                     )}
                   </dl>
                   <InspectionProgress inspection={current} />
+                  {current.provider_metadata?.image_quality && (
+                    <div className="inline-note" role="status">
+                      <CircleAlert size={16} aria-hidden="true" />
+                      <div><strong>Image quality: {label(current.provider_metadata.image_quality.quality_status)}</strong>
+                        {current.provider_metadata.image_quality.issues.length > 0 &&
+                          <p>{current.provider_metadata.image_quality.issues.map(label).join(", ")}. {current.provider_metadata.image_quality.retake_instructions.join(" ")}</p>}
+                      </div>
+                    </div>
+                  )}
                   {current.provider_error && (
                     <div className="error-state" role="alert">
                       <CircleAlert size={19} aria-hidden="true" />
@@ -1901,9 +1933,11 @@ function AuditList({ events }: { events: Audit[] }) {
   );
 }
 function History() {
+  const { token } = useContext(TokenContext);
   const q = useQuery({
     queryKey: ["inspections"],
     queryFn: () => api<Inspection[]>("/inspections"),
+    enabled: !!token,
   });
   const [status, setStatus] = useState("ALL");
   const rows =
@@ -1933,7 +1967,9 @@ function History() {
           </select>
         }
       >
-        {q.isPending ? (
+        {!token ? (
+          <NoTokenState />
+        ) : q.isPending ? (
           <Loading />
         ) : q.isError ? (
           <ErrorState error={q.error} retry={() => q.refetch()} />

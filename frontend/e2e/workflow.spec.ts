@@ -51,7 +51,7 @@ test.describe("SYSVIA ProofSight — Final Release Hardening E2E", () => {
     // 3. Demo Workspace loads 5 synthetic scenarios clearly labeled
     await page.goto("/demo");
     await expect(page.locator(".demo-workspace")).toBeVisible();
-    await expect(page.locator(".demo-truth")).toContainText("Original synthetic evidence");
+    await expect(page.locator(".demo-truth")).toContainText("Synthetic evidence only");
 
     // Ensure all 5 synthetic fixture titles exist
     await expect(page.getByText("Visible shortfall")).toBeVisible();
@@ -61,7 +61,7 @@ test.describe("SYSVIA ProofSight — Final Release Hardening E2E", () => {
     await expect(page.getByText("Unidentified shape")).toBeVisible();
 
     // Verify TEST FIXTURE labels
-    const fixtureBadges = page.locator(".demo-asset .eyebrow");
+    const fixtureBadges = page.locator(".demo-asset .eyebrow", { hasText: "TEST FIXTURE" });
     expect(await fixtureBadges.count()).toBe(5);
 
     // 4. Verify refresh preserves workflow state (authentication persistence)

@@ -1,0 +1,46 @@
+{
+  "live_cases": 2,
+  "synthetic_cases": 2,
+  "physical_cases": 0,
+  "paid_model_requests": 12,
+  "inspection_latency_median_ms": 18998.0,
+  "latency_sample_size": 2,
+  "api_cost": "UNKNOWN",
+  "false_verifications": 0,
+  "shipping_safety_violations": 0,
+  "uncertain_outcomes": 2,
+  "cases": [
+    {
+      "scenario_id": "packing-missing-before",
+      "provenance": "SYNTHETIC",
+      "outcome": "NEEDS_HUMAN_REVIEW",
+      "inspection_status": "NEEDS_REVIEW",
+      "inspection_latency_ms": 19253,
+      "muse_latency_ms": 11937,
+      "sam_latency_ms": 4103,
+      "muse_requests": 1,
+      "sam_requests": 1,
+      "agent_requests": 4,
+      "tool_called": 5,
+      "tool_completed": 5,
+      "shipping_status": "HELD",
+      "source_result": "evaluation\\results\\20261101T112909Z-live.json"
+    },
+    {
+      "scenario_id": "packing-extra-before",
+      "provenance": "SYNTHETIC",
+      "outcome": "NEEDS_HUMAN_REVIEW",
+      "inspection_status": "NEEDS_REVIEW",
+      "inspection_latency_ms": 18743,
+      "muse_latency_ms": 11876,
+      "sam_latency_ms": 3841,
+      "muse_requests": 1,
+      "sam_requests": 1,
+      "agent_requests": 4,
+      "tool_called": 5,
+      "tool_completed": 5,
+      "shipping_status": "HELD",
+      "source_result": "evaluation\\results\\20261101T113031Z-live.json"
+    }
+  ]
+}

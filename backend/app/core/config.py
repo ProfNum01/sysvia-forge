@@ -16,6 +16,8 @@ class Settings:
     operator_token: str = field(default="", repr=False)
     cors_origins: tuple[str, ...] = ("http://127.0.0.1:5173", "http://localhost:5173")
     max_upload_bytes: int = 15 * 1024 * 1024
+    quality_gate_enabled: bool = False
+    quality_min_side: int = 256
 
     @classmethod
     def from_env(cls):
@@ -25,6 +27,8 @@ class Settings:
         return cls(
             database_url=os.getenv("DATABASE_URL", f"sqlite:///{data_dir / 'proofsight.db'}"),
             data_dir=data_dir,
+            quality_gate_enabled=os.getenv("QUALITY_GATE_ENABLED", "true").lower() == "true",
+            quality_min_side=int(os.getenv("QUALITY_MIN_SIDE", "256")),
             operator_token=os.getenv("OPERATOR_TOKEN", ""),
             cors_origins=tuple(x.strip() for x in os.getenv(
                 "CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173").split(",") if x.strip()),

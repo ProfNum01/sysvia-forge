@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.app.core.config import Settings
 from backend.app.models.database import Base, connect_database
-from backend.app.services.seed import seed_demo
+from backend.app.services.seed import seed_demo, seed_packing_demo
 
 if __name__ == "__main__":
     import argparse
@@ -37,5 +37,7 @@ if __name__ == "__main__":
                 db.commit()
                 print("Synthetic demo orders reset.")
         created = seed_demo(db)
+        packing_created = seed_packing_demo(db)
     engine.dispose()
     print("Synthetic demo orders and inventory seeded." if created else "Seed skipped; existing order data was preserved.")
+    print("Synthetic packing orders seeded." if packing_created else "Synthetic packing orders already exist.")

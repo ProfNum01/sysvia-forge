@@ -81,7 +81,7 @@ async function runE2E() {
     await page.waitForSelector(".demo-workspace");
 
     const truthText = await page.textContent(".demo-truth");
-    assert(truthText.includes("Original synthetic evidence"), "Must clearly label synthetic evidence");
+    assert(truthText.includes("Synthetic evidence only"), "Must clearly label synthetic evidence");
 
     const fixtureTitles = [
       "Visible shortfall",

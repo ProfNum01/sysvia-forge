@@ -6,6 +6,7 @@ import hashlib
 import json
 import sys
 import time
+from PIL import Image
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -24,6 +25,7 @@ def validate_manifest(path: Path):
     if not isinstance(document.get("cases"), list) or not document["cases"]:
         raise ValueError("Dataset has no cases")
     seen = set()
+    catalog = document.get("catalog", {})
     for case in document["cases"]:
         if not isinstance(case, dict) or REQUIRED - case.keys():
             raise ValueError("Case lacks required benchmark fields")
@@ -37,11 +39,18 @@ def validate_manifest(path: Path):
             raise ValueError(f"Evidence unavailable: {case['scenario_id']}")
         if case["provenance"] == "PHYSICAL_CAPTURE" and "fixtures" in evidence.parts:
             raise ValueError("Synthetic fixture cannot be labeled physical")
+        with Image.open(evidence) as image:
+            image.verify()
+        with Image.open(evidence) as image:
+            if min(image.size) < 1:
+                raise ValueError(f"Empty image: {case['scenario_id']}")
         for field in ("expected_quantities", "ground_truth_quantities"):
             values = case[field]
             if not isinstance(values, dict) or any(not isinstance(k, str) or type(v) is not int or v < 0
                                                    for k, v in values.items()):
                 raise ValueError(f"Invalid {field}: {case['scenario_id']}")
+            if any(key not in catalog for key in values):
+                raise ValueError(f"Unmapped product in {field}: {case['scenario_id']}")
     return document
 
 
@@ -107,7 +116,7 @@ def run_live(case, token):
     from backend.app.core.config import Settings
     from backend.app.main import create_app
     from backend.app.models.database import AuditEvent
-    from backend.app.services.seed import seed_demo
+    from backend.app.services.seed import seed_demo, seed_packing_demo
 
     evidence = ROOT / case["evidence"]
     with TemporaryDirectory(prefix="proofsight-benchmark-") as directory:
@@ -118,6 +127,8 @@ def run_live(case, token):
         with TestClient(app) as client:
             with app.state.sessions() as db:
                 seed_demo(db)
+                if case["order_id"].startswith("order-packing-"):
+                    seed_packing_demo(db)
             upload = client.post("/api/inspections", headers=headers,
                 data={"order_id": case["order_id"], "rights_confirmed": "true"},
                 files={"image": (evidence.name, evidence.read_bytes(), "image/png")})

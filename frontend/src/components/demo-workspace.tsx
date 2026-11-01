@@ -21,7 +21,7 @@ export function DemoWorkspace({ token }: { token: string }) {
 
   return <div className="demo-workspace">
     <div className="demo-truth"><CircleAlert size={20} aria-hidden="true" />
-      <div><strong>Original synthetic evidence</strong><p>These are locally drawn test scenes. They do not document a physical warehouse correction. Upload and Analyze use the actual backend; Analyze and Investigate can make paid Meta requests.</p></div>
+      <div><strong>Synthetic evidence only</strong><p>The original test fixtures and separate packing scene dataset do not document a physical warehouse correction. Packing scenes have no visible SKU labels. Analyze and Investigate can make paid Meta requests.</p></div>
     </div>
 
     {!token && (
@@ -65,17 +65,23 @@ export function DemoWorkspace({ token }: { token: string }) {
       <div className="panel-heading"><div><h2>Rights-cleared scenes</h2><p>Images served from the local backend. Choose one to load it into Visual Inspection.</p></div><Image size={20} aria-hidden="true" /></div>
       {assets.isPending ? <p className="demo-message"><LoaderCircle className="spin" size={16} aria-hidden="true" /> Loading assets...</p> :
         assets.isError ? <p className="demo-message" role="alert">{assets.error.message} <button onClick={() => assets.refetch()}>Retry</button></p> :
-        assets.data?.length ? <div className="demo-assets">{assets.data.map((asset) => {
+        assets.data?.length ? <div className="demo-assets">{assets.data.filter((asset) =>
+          asset.provenance !== "synthetic_packing" || selected?.id === (asset.name.includes("missing") ? "order-packing-missing" : "order-packing-extra")
+        ).map((asset) => {
           const query = new URLSearchParams(selected?.latest_inspection_id ?
             { id: selected.latest_inspection_id, demo: asset.name, reinspect: "1" } :
             { order: selected?.id ?? "", demo: asset.name });
-          const canUse = !!token && !!selected && !blocked;
+          const canUse = !!token && !!selected && !blocked &&
+            (asset.provenance !== "synthetic_packing" ||
+              (asset.name.endsWith("after") ? !!selected.latest_inspection_id : !selected.latest_inspection_id));
           return <article className="demo-asset" key={asset.name}>
             <img src={asset.url} alt={`${asset.title}, original synthetic test scene`} loading="lazy" />
-            <div><span className="eyebrow">TEST FIXTURE</span><h3>{asset.title}</h3><p>{asset.description}</p>
+            <div><span className="eyebrow">{asset.provenance === "synthetic_packing" ? "SYNTHETIC PACKING" : "TEST FIXTURE"}</span><h3>{asset.title}</h3><p>{asset.description}</p>
               {canUse ? (
                 <Button asChild size="sm" variant="outline"><Link to={`/inspection?${query}`}>
                   Use in inspection <ArrowRight size={14} aria-hidden="true" /></Link></Button>
+              ) : asset.provenance === "synthetic_packing" && !!token ? (
+                <span className="demo-message">{asset.name.endsWith("after") ? "Inspect the before image and complete any required approval first." : "This order already has evidence; follow its inspection chain."}</span>
               ) : (
                 <Button asChild size="sm" variant="outline"><Link to="/settings">
                   <LockKeyhole size={13} aria-hidden="true" /> Set token to use <ArrowRight size={14} aria-hidden="true" /></Link></Button>

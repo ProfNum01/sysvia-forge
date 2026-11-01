@@ -25,6 +25,7 @@ from backend.app.services.catalog import reference_path
 from backend.app.services.investigation import investigate_with_read_tools
 from backend.app.services.inventory import available_quantity
 from backend.app.services.media import prepare_image
+from backend.app.services.image_quality import analyze_image_quality
 from backend.app.services.provider import run_visual_models
 from backend.app.services.reconciliation import reconcile
 from proofsight.meta_api import MetaConfig, MetaConfigurationError, classify_api_error
@@ -36,6 +37,12 @@ DEMO_ASSETS = {
     "extra": ("Additional product", "Two red, one blue, and one green package in an original synthetic scene."),
     "ambiguous": ("Unreadable label", "A product label is deliberately unreadable in an original synthetic scene."),
     "unidentified": ("Unidentified shape", "An additional unidentified object appears in an original synthetic scene."),
+}
+PACKING_ASSETS = {
+    "packing-missing-before": ("Missing pouch · before", "01_missing_product_before.png"),
+    "packing-missing-after": ("Missing pouch · after", "02_missing_product_after.png"),
+    "packing-extra-before": ("Extra cube · before", "03_extra_product_before.png"),
+    "packing-extra-after": ("Extra cube · after", "04_extra_product_after.png"),
 }
 
 
@@ -108,17 +115,22 @@ def product_catalog(actor=Depends(supervisor), db=Depends(database)):
 @router.get("/demo/assets")
 def demo_assets():
     folder = ROOT / "data" / "fixtures"
-    return [{"name": name, "title": title, "description": description,
+    original = [{"name": name, "title": title, "description": description,
              "provenance": "original_synthetic_fixture", "url": f"/api/demo/assets/{name}"}
             for name, (title, description) in DEMO_ASSETS.items()
             if (folder / f"task002-{name}.png").is_file()]
+    packing = ROOT / "evaluation" / "datasets" / "synthetic-packing"
+    return original + [{"name": name, "title": title, "description": "SYNTHETIC packing scene; SKU identity is not visually proven.",
+                        "provenance": "synthetic_packing", "url": f"/api/demo/assets/{name}"}
+                       for name, (title, filename) in PACKING_ASSETS.items() if (packing / filename).is_file()]
 
 
 @router.get("/demo/assets/{name}")
 def demo_asset(name: str):
-    if name not in DEMO_ASSETS:
+    if name not in DEMO_ASSETS and name not in PACKING_ASSETS:
         raise HTTPException(404, "Demo asset was not found.")
-    path = ROOT / "data" / "fixtures" / f"task002-{name}.png"
+    path = (ROOT / "evaluation" / "datasets" / "synthetic-packing" / PACKING_ASSETS[name][1]
+            if name in PACKING_ASSETS else ROOT / "data" / "fixtures" / f"task002-{name}.png")
     if not path.is_file():
         raise HTTPException(404, "Demo asset is unavailable on this installation.")
     return FileResponse(path, media_type="image/png", headers={
@@ -196,7 +208,9 @@ def create_inspection(request, db, order_id, image, rights_confirmed, parent=Non
         raise HTTPException(422, "Confirm that the image is synthetic or you have rights to use it.")
     if creation_key is not None and not re.fullmatch(r"[a-zA-Z0-9_-]{8,100}", creation_key):
         raise HTTPException(422, "Idempotency-Key must be 8–100 letters, digits, underscores, or hyphens.")
+    validation_start = time.perf_counter()
     photo_id, digest, destination, content, width, height = prepare_image(image, request.app.state.settings)
+    validation_ms = round((time.perf_counter() - validation_start) * 1000)
     if creation_key:
         existing = db.scalar(select(Inspection).where(Inspection.creation_key == creation_key))
         if existing:
@@ -236,11 +250,16 @@ def create_inspection(request, db, order_id, image, rights_confirmed, parent=Non
             prior = db.get(Inspection, prior.previous_inspection_id) if prior.previous_inspection_id else None
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(content)
+    quality_start = time.perf_counter()
+    quality = analyze_image_quality(content, min_side=request.app.state.settings.quality_min_side)
+    quality_ms = round((time.perf_counter() - quality_start) * 1000)
     inspection = Inspection(order_id=order.id, requirements_revision=order.requirements_revision,
                             order_version=order.version,
                             photo_id=photo_id, image_path=str(destination),
                             image_sha256=digest, image_width=width, image_height=height, creation_key=creation_key,
-                            processing_stage="IMAGE_VALIDATED", previous_inspection_id=parent.id if parent else None)
+                            processing_stage="IMAGE_VALIDATED", previous_inspection_id=parent.id if parent else None,
+                            provider_metadata={"image_quality": quality, "image_validation_ms": validation_ms,
+                                               "image_quality_ms": quality_ms})
     try:
         db.add(inspection)
         db.flush()
@@ -257,6 +276,7 @@ def create_inspection(request, db, order_id, image, rights_confirmed, parent=Non
         audit(db, "REINSPECTION_UPLOADED" if parent else "IMAGE_UPLOADED", inspection.id,
               {"photo_id": photo_id, "order_id": order.id, "previous_photo_id": parent.photo_id if parent else None}, actor="operator-upload")
         audit(db, "IMAGE_VALIDATED", inspection.id, {"width": width, "height": height, "format": "PNG"})
+        audit(db, "IMAGE_QUALITY_ANALYZED", inspection.id, quality)
         db.commit()
     except Exception:
         db.rollback()
@@ -382,6 +402,18 @@ def analyze(request: Request, inspection_id: str, actor=Depends(supervisor), db=
     with request.app.state.mutations:
         inspection = required(db, Inspection, inspection_id)
         order = require_current(db, inspection)
+        quality = (inspection.provider_metadata or {}).get("image_quality", {})
+        if (request.app.state.settings.quality_gate_enabled
+                and quality.get("quality_status") in {"RETAKE_RECOMMENDED", "TECHNICAL_FAILURE"}):
+            inspection.status = "NEEDS_REVIEW"
+            inspection.processing_stage = "IMAGE_QUALITY_BLOCKED"
+            inspection.reconciliation_status = "NEEDS_REVIEW"
+            order.status = "HELD"
+            order.shipping_status = "HELD"
+            order.requires_reinspection = True
+            audit(db, "IMAGE_QUALITY_BLOCKED", inspection.id, quality, actor=actor)
+            db.commit()
+            return inspection_out(inspection)
         if order.preparation_status == "PREPARING":
             raise HTTPException(409, "The order preparation must be ready before inspection.")
         changed = db.execute(update(Inspection).where(Inspection.id == inspection_id,
@@ -393,10 +425,11 @@ def analyze(request: Request, inspection_id: str, actor=Depends(supervisor), db=
         inspection.processing_stage = "ANALYSIS_STARTED"
         audit(db, "ANALYSIS_STARTED", inspection.id, {"photo_id": inspection.photo_id}, actor=actor)
         db.commit()
+        catalog_prefix = "packing-" if order.id.startswith("order-packing-") else "product-"
         products = [{"id": p.id, "sku": p.sku, "name": p.name, "color": p.color, "description": p.description,
                      "reference_image_path": str(reference_path(request.app.state.settings.data_dir, p.id, p.sku))
                          if reference_path(request.app.state.settings.data_dir, p.id, p.sku) else None}
-                    for p in db.scalars(select(Product).order_by(Product.id).limit(4))]
+                    for p in db.scalars(select(Product).where(Product.id.like(f"{catalog_prefix}%")).order_by(Product.id).limit(4))]
     allowed_events = {"MUSE_ANALYSIS_STARTED", "MUSE_ANALYSIS_COMPLETED",
                       "SAM_SEGMENTATION_STARTED", "SAM_SEGMENTATION_COMPLETED"}
 
@@ -482,7 +515,7 @@ def finish_analysis(db, inspection, result, sam, products, observations, regions
         db.add(Discrepancy(inspection_id=inspection.id, **discrepancy))
     inspection.segmentations = [{"boxes": sam.get("boxes", []), "masks": sam.get("masks", []),
                                 "note": "SAM geometry does not independently establish product SKU."}]
-    inspection.provider_metadata = {"muse_model": result["muse"].get("model"),
+    inspection.provider_metadata = {**(inspection.provider_metadata or {}), "muse_model": result["muse"].get("model"),
         "muse_usage": result["muse"].get("usage"), "muse_latency_ms": result["muse"].get("latency_ms"),
         "sam_latency_ms": sam.get("latency_ms"), "sam_model": "sam-3.1", "total_latency_ms": latency_ms,
         "muse_http_status": result["muse"].get("http_status"), "sam_http_status": sam.get("http_status"),

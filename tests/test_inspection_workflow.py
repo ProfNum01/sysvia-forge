@@ -103,10 +103,24 @@ class InspectionWorkflowTests(unittest.TestCase):
             first = self.client.post(f"/api/inspections/{inspection['id']}/analyze", headers=self.auth)
             duplicate = self.client.post(f"/api/inspections/{inspection['id']}/analyze", headers=self.auth)
         self.assertEqual(first.status_code, 200)
+        self.assertIn("image_quality", first.json()["provider_metadata"])
         self.assertEqual(duplicate.status_code, 409)
         self.assertEqual(len(requests), 1)
         self.assertEqual({product["id"] for product in requests[0][1]},
                          {"product-red", "product-blue", "product-amber", "product-green"})
+
+    def test_quality_gate_blocks_paid_inference_and_shipping(self):
+        from dataclasses import replace
+        self.app.state.settings = replace(self.settings, quality_gate_enabled=True)
+        inspection = self.upload().json()
+        with patch("backend.app.api.routes.run_visual_models") as provider:
+            response = self.client.post(f"/api/inspections/{inspection['id']}/analyze", headers=self.auth)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "NEEDS_REVIEW")
+        self.assertEqual(response.json()["processing_stage"], "IMAGE_QUALITY_BLOCKED")
+        provider.assert_not_called()
+        order = self.client.get("/api/orders/order-1001").json()
+        self.assertEqual(order["shipping_status"], "HELD")
 
     def test_malformed_observation_and_outside_geometry_leave_no_partial_results(self):
         original = grounded_visual_result()

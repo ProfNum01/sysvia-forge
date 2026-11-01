@@ -1,0 +1,106 @@
+{
+  "dataset_id": "synthetic-packing-existing-v1",
+  "mode": "OFFLINE_MANIFEST",
+  "created_at": "2026-11-01T11:32:51.345901+00:00",
+  "cases_available": 4,
+  "live_inspection_attempts": 0,
+  "metrics": {
+    "sample_size": 0,
+    "provenance_counts": {},
+    "false_verification_count": 0,
+    "false_verification_rate_percent": null,
+    "human_review_count": 0,
+    "human_review_rate_percent": null,
+    "unauthorized_execution_count": null,
+    "incorrect_verification_count": 0,
+    "successful_verification_count": 0,
+    "unresolved_discrepancy_count": 0,
+    "stale_order_rejection_count": null,
+    "shipping_safety_violation_count": 0,
+    "agent_sample_size": 0,
+    "valid_action_proposal_rate_percent": null,
+    "tool_execution_success_rate_percent": null,
+    "incorrect_action_proposal_count": 0,
+    "average_investigation_duration_seconds": null,
+    "product_identification_accuracy_percent": null,
+    "product_identification_accuracy_note": "No independent region-level SKU annotations; not measured.",
+    "quantity_agreement_sample_size": 0,
+    "quantity_agreement_percent": null,
+    "discrepancy_detection_sample_size": 0,
+    "uncertain_cases_excluded_from_detection_metrics": 0,
+    "discrepancy_detection_precision_percent": null,
+    "discrepancy_detection_recall_percent": null
+  },
+  "cases": [
+    {
+      "scenario_id": "packing-missing-before",
+      "provenance": "SYNTHETIC",
+      "evidence": "evaluation/datasets/synthetic-packing/01_missing_product_before.png",
+      "evidence_sha256": "d1804a2c22db5ad76426bfc5d3a6573ffe66c855678642b0be0da8973b4b9bfc",
+      "ground_truth_quantities": {
+        "packing-blue-box": 2,
+        "packing-red-can": 1,
+        "packing-yellow-pouch": 0
+      },
+      "ground_truth_limitations": "Visible shape and color only; no readable SKU labels.",
+      "expected_discrepancy": [
+        "MISSING_OR_REVIEW"
+      ],
+      "expected_agent_behavior": "REQUEST_REVIEW_OR_NEW_IMAGE",
+      "expected_verification_policy": "NEEDS_REVIEW",
+      "outcome": "NOT_RUN"
+    },
+    {
+      "scenario_id": "packing-missing-after",
+      "provenance": "SYNTHETIC",
+      "evidence": "evaluation/datasets/synthetic-packing/02_missing_product_after.png",
+      "evidence_sha256": "dfdc1beab619a0ddd706116d0cc6d83575692178ed02da367c9551adf705b0fa",
+      "ground_truth_quantities": {
+        "packing-blue-box": 2,
+        "packing-red-can": 1,
+        "packing-yellow-pouch": 1
+      },
+      "ground_truth_limitations": "Visible shape and color only; no readable SKU labels.",
+      "expected_discrepancy": [],
+      "expected_agent_behavior": "NO_INVESTIGATION_IF_VERIFIED_ELSE_REVIEW",
+      "expected_verification_policy": "VERIFY_ONLY_WITH_SUFFICIENT_EVIDENCE",
+      "outcome": "NOT_RUN"
+    },
+    {
+      "scenario_id": "packing-extra-before",
+      "provenance": "SYNTHETIC",
+      "evidence": "evaluation/datasets/synthetic-packing/03_extra_product_before.png",
+      "evidence_sha256": "daf87eca29ed2fe2a68227a32030ded5a3d7f9e505cd5c342026fe5dfa4ce369",
+      "ground_truth_quantities": {
+        "packing-blue-box": 2,
+        "packing-red-can": 1,
+        "packing-yellow-pouch": 1,
+        "packing-green-cube": 1
+      },
+      "ground_truth_limitations": "Visible shape and color only; no readable SKU labels.",
+      "expected_discrepancy": [
+        "EXTRA_OR_REVIEW"
+      ],
+      "expected_agent_behavior": "REQUEST_REVIEW_OR_NEW_IMAGE",
+      "expected_verification_policy": "NEEDS_REVIEW",
+      "outcome": "NOT_RUN"
+    },
+    {
+      "scenario_id": "packing-extra-after",
+      "provenance": "SYNTHETIC",
+      "evidence": "evaluation/datasets/synthetic-packing/04_extra_product_after.png",
+      "evidence_sha256": "f823163a4fb1b9e15324012ca9869c23a1b68febe2f1c0e33773d2253e2f5943",
+      "ground_truth_quantities": {
+        "packing-blue-box": 2,
+        "packing-red-can": 1,
+        "packing-yellow-pouch": 1,
+        "packing-green-cube": 0
+      },
+      "ground_truth_limitations": "Visible shape and color only; no readable SKU labels.",
+      "expected_discrepancy": [],
+      "expected_agent_behavior": "NO_INVESTIGATION_IF_VERIFIED_ELSE_REVIEW",
+      "expected_verification_policy": "VERIFY_ONLY_WITH_SUFFICIENT_EVIDENCE",
+      "outcome": "NOT_RUN"
+    }
+  ]
+}

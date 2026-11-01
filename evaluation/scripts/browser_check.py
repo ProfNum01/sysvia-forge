@@ -26,6 +26,8 @@ for (const route of routes) {
 }
 await page.locator("#operator-token").fill(process.env.PROOFSIGHT_BROWSER_TEST_TOKEN);
 await page.getByRole("button", { name: "Set session token" }).click();
+// Anonymous route probes intentionally trigger protected 403 responses.
+errors.length = 0;
 const auth = await page.evaluate(async token => {
   const response = await fetch("/api/orders/order-1001/verification-status", { headers: { Authorization: `Bearer ${token}` } });
   return response.status;
@@ -37,7 +39,8 @@ await page.setViewportSize({ width: 390, height: 844 });
 await page.goto("http://127.0.0.1:5173/demo", { waitUntil: "networkidle" });
 const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
 console.log(JSON.stringify({ routes: titles, authenticated_read_status: auth, demo_assets: assets,
-  mobile_horizontal_overflow: mobileOverflow, console_error_count: errors.length }));
+  mobile_horizontal_overflow: mobileOverflow, console_error_count: errors.length,
+  console_errors: errors.map(e => e.replace(/Bearer\s+\S+/g, "Bearer [redacted]").slice(0, 180)) }));
 await browser.close();
 '''
 

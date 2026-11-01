@@ -92,3 +92,9 @@
 - Executed 1 live Meta API diagnostic ping to verify active status of credentials and `muse-spark-1.3` endpoint (HTTP 200, 2124ms latency). Verified 135 backend tests, 23 frontend unit tests, production build, Playwright browser E2E (2/2 spec tests, 9/9 phases), SQLite integrity, and offline benchmark runner with zero defects.
 
 
+## 2026-11-01 — Final AI intelligence sprint (partial)
+
+- Inspected the four existing synthetic packing images and preserved them unchanged. Created a separate `PACK-*` product catalog and two synthetic orders because the existing `PS-*` reference drawings represent different objects. Added a linked before/after manifest; original benchmark manifest and fixtures remain intact.
+- Added local image-quality measurements and a conservative gate before paid inference. Low resolution, severe low light, or severe overexposure blocks analysis and holds shipping; uncertain glare or texture is a review warning. The four supplied packing images passed this local gate. Added quality display in Visual Inspection.
+- Ran two live Meta inspections, one per packing-before scenario. Both returned `NEEDS_REVIEW` with five completed read-tool calls each. Records show 2 Muse, 2 SAM, and 8 agent model starts in total: 12 paid model requests. Inspection latencies were 19,253 ms and 18,743 ms. Both cases remained unverified; no shipping safety violation was observed. The after images received no live inference.
+- Added reproducible JSON/CSV aggregation, adjusted the browser walkthrough to distinguish expected anonymous 403 responses from authenticated console errors, and updated the demo script/shot list to remove unsupported physical and certainty claims. Backend tests: 142 passed, 45 subtests; frontend tests: 23 passed; production build and Playwright (2/2) passed. Existing read-only browser E2E: nine phases passed. Physical correction, full approval/reinspection for the new pairs, and a final video remain unvalidated.

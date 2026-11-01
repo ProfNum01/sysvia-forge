@@ -129,6 +129,7 @@ export type Inspection = {
     | "NEEDS_REVIEW"
     | "VERIFIED";
   provider_metadata?: {
+      image_quality?: { quality_status: string; issues: string[]; retake_instructions: string[]; measurements: Record<string, number> };
     muse_model?: string;
     muse_usage?: unknown;
     muse_latency_ms?: number;
@@ -217,6 +218,6 @@ export type DemoAsset = {
   name: string;
   title: string;
   description: string;
-  provenance: "original_synthetic_fixture";
+    provenance: "original_synthetic_fixture" | "synthetic_packing";
   url: string;
 };

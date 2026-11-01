@@ -18,8 +18,8 @@
 | 5 | **README Complete** | **COMPLETE** | Production-grade `README.md` created with architecture, Meta AI usage, benchmarks, installation, and honest limitations. |
 | 6 | **Installation Tested** | **COMPLETE** | Local installation verified on Windows/PowerShell and Docker instructions validated against compose file. |
 | 7 | **Meta Integration Documented** | **COMPLETE** | Muse Spark 1.3 and SAM 3.1 endpoints, function calling schemas, and streaming parsers documented in README and submission content. |
-| 8 | **Benchmark Evidence** | **COMPLETE** | Five synthetic benchmark cases documented in `evaluation/manifests/synthetic.json`; offline benchmark results stored; two live cases recorded. |
-| 9 | **Three-Minute Video Script** | **COMPLETE** | `submission/DEMO_SCRIPT.md` and `submission/DEMO_SHOT_LIST.md` created, timed to 180 seconds maximum. |
+| 8 | **Benchmark Evidence** | **PARTIAL** | Five original fixtures and four existing packing images are manifest-validated. Two packing-before cases received live Meta inference; both need review. Packing-after and physical correction remain unvalidated. |
+| 9 | **Three-Minute Video Script** | **READY FOR REVIEW** | Script and shot list now reflect the two uncertain live packing results and the uninspected after images. |
 | 10 | **Accessible Video URL** | **PENDING** | Video recording and hosting on public YouTube/Loom is pending final owner recording using the provided script and shot list. |
 | 11 | **Submission Description** | **COMPLETE** | Form-ready copy prepared in `submission/SUBMISSION.md` with all required problem, solution, and technical innovation fields. |
 | 12 | **Team Details Verified** | **COMPLETE** | Contributor identity (`ProfNum01`) and project metadata documented. |
