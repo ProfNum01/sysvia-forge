@@ -45,6 +45,8 @@ def reconcile(expected: list[dict], observations: list[dict], geometry_available
                      and 1 <= quantity <= 10000 and quantity == len(ids))
         normalized.append({
             "product_id": pid if product else None, "sku": product["sku"] if product else None,
+            "visual_candidate_product_id": observation.get("visual_candidate_product_id"),
+            "visual_evidence": observation.get("visual_evidence", ""),
             "quantity": quantity if count else None, "label_text": label, "evidence": detail,
             "identity_certain": identity, "count_certain": count,
             "identification_status": "MATCHED" if identity and count else "UNCERTAIN" if product else "UNIDENTIFIED",
@@ -55,6 +57,7 @@ def reconcile(expected: list[dict], observations: list[dict], geometry_available
     if unclaimed:
         normalized.append({
             "product_id": None, "sku": None, "quantity": None, "label_text": "",
+            "visual_candidate_product_id": None, "visual_evidence": "",
             "evidence": "SAM returned unmatched visual regions. Their product identity and quantity are not established.",
             "identity_certain": False, "count_certain": False, "identification_status": "UNIDENTIFIED",
             "evidence_region_ids": unclaimed,

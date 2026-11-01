@@ -15,13 +15,14 @@ export function DemoWorkspace({ token }: { token: string }) {
   });
   const assets = useQuery({ queryKey: ["demo-assets"], queryFn: () => api<DemoAsset[]>("/demo/assets") });
   const meta = useQuery({ queryKey: ["meta-status"], queryFn: () => api<MetaStatus>("/integrations/meta/status") });
-  const syntheticOrders = (orders.data ?? []).filter((order) => order.data_source === "synthetic_seed");
-  const selected = syntheticOrders.find((order) => order.id === selectedId) ?? syntheticOrders[0];
+  const demoOrders = (orders.data ?? []).filter((order) => ["synthetic_seed", "synthetic_claude", "physical_capture"].includes(order.data_source))
+    .sort((a, b) => Number(b.data_source === "synthetic_seed") - Number(a.data_source === "synthetic_seed"));
+  const selected = demoOrders.find((order) => order.id === selectedId) ?? demoOrders.find((order) => order.reference === "PS-1001") ?? demoOrders[0];
   const blocked = selected?.shipping_status === "SHIPPED";
 
   return <div className="demo-workspace">
     <div className="demo-truth"><CircleAlert size={20} aria-hidden="true" />
-      <div><strong>Synthetic evidence only</strong><p>The original test fixtures and separate packing scene dataset do not document a physical warehouse correction. Packing scenes have no visible SKU labels. Analyze and Investigate can make paid Meta requests.</p></div>
+      <div><strong>Synthetic evidence only</strong><p>Original fixtures, unlabeled packing scenes, and Claude AI generated labeled scenes do not document a physical warehouse correction. Analyze and Investigate can make paid Meta requests; open an inspection to see saved model evidence.</p></div>
     </div>
 
     {!token && (
@@ -49,14 +50,15 @@ export function DemoWorkspace({ token }: { token: string }) {
 
     {token && (
       <section className="panel">
-        <div className="panel-heading"><div><h2>Choose a synthetic order</h2><p>Only database records marked as synthetic seed data appear here.</p></div><Package size={20} aria-hidden="true" /></div>
+        <div className="panel-heading"><div><h2>Choose a synthetic order</h2><p>Synthetic seeds and explicitly registered physical orders appear here with separate provenance.</p></div><Package size={20} aria-hidden="true" /></div>
         {orders.isPending ? <p className="demo-message"><LoaderCircle className="spin" size={16} aria-hidden="true" /> Loading orders...</p> :
           orders.isError ? <p className="demo-message" role="alert">{orders.error.message} <button onClick={() => orders.refetch()}>Retry</button></p> :
-          syntheticOrders.length ? <div className="demo-order-select"><label htmlFor="demo-order">Demonstration order</label>
+          demoOrders.length ? <div className="demo-order-select"><label htmlFor="demo-order">Demonstration order</label>
             <select id="demo-order" value={selected?.id ?? ""} onChange={(event) => setSelectedId(event.target.value)}>
-              {syntheticOrders.map((order) => <option key={order.id} value={order.id}>{order.reference} · {label(order.status)}</option>)}
+              {demoOrders.map((order) => <option key={order.id} value={order.id}>{order.reference} · {label(order.status)}{order.data_source === "physical_capture" ? " · PHYSICAL_CAPTURE" : ""}</option>)}
             </select>
-            {selected && <div className="demo-manifest"><strong>Authoritative manifest</strong><span>{selected.items.map((item) => `${item.product.sku} × ${item.quantity}`).join(" · ")}</span><span>Shipping: {label(selected.shipping_status ?? "NOT_READY")}</span></div>}
+            {selected && <div className="demo-manifest"><strong>Authoritative manifest · {selected.data_source === "physical_capture" ? "PHYSICAL_CAPTURE" : "SYNTHETIC"}</strong><span>{selected.items.map((item) => `${item.product.sku} × ${item.quantity}`).join(" · ")}</span><span>Shipping: {label(selected.shipping_status ?? "NOT_READY")}</span></div>}
+            {selected && (selected.data_source === "physical_capture" || selected.latest_inspection_id) && <Button asChild size="sm" variant="outline"><Link to={selected.latest_inspection_id ? `/inspection?id=${selected.latest_inspection_id}` : `/inspection?order=${selected.id}`}>Open inspection evidence <ArrowRight size={14} aria-hidden="true" /></Link></Button>}
           </div> : <p className="demo-message">No synthetic orders are available in this database.</p>}
       </section>
     )}
@@ -65,18 +67,21 @@ export function DemoWorkspace({ token }: { token: string }) {
       <div className="panel-heading"><div><h2>Rights-cleared scenes</h2><p>Images served from the local backend. Choose one to load it into Visual Inspection.</p></div><Image size={20} aria-hidden="true" /></div>
       {assets.isPending ? <p className="demo-message"><LoaderCircle className="spin" size={16} aria-hidden="true" /> Loading assets...</p> :
         assets.isError ? <p className="demo-message" role="alert">{assets.error.message} <button onClick={() => assets.refetch()}>Retry</button></p> :
+        selected?.data_source === "physical_capture" ? <p className="demo-message">Upload physical photos through the authorized inspection page. Synthetic assets are never substituted.</p> :
         assets.data?.length ? <div className="demo-assets">{assets.data.filter((asset) =>
-          asset.provenance !== "synthetic_packing" || selected?.id === (asset.name.includes("missing") ? "order-packing-missing" : "order-packing-extra")
+          asset.provenance === "synthetic_claude" ? selected?.data_source === "synthetic_claude" :
+          asset.provenance !== "synthetic_packing" ? selected?.data_source !== "synthetic_claude" :
+          selected?.id === (asset.name.includes("missing") ? "order-packing-missing" : "order-packing-extra")
         ).map((asset) => {
           const query = new URLSearchParams(selected?.latest_inspection_id ?
             { id: selected.latest_inspection_id, demo: asset.name, reinspect: "1" } :
             { order: selected?.id ?? "", demo: asset.name });
           const canUse = !!token && !!selected && !blocked &&
-            (asset.provenance !== "synthetic_packing" ||
+            (asset.provenance === "synthetic_claude" ? !selected.latest_inspection_id : asset.provenance !== "synthetic_packing" ||
               (asset.name.endsWith("after") ? !!selected.latest_inspection_id : !selected.latest_inspection_id));
           return <article className="demo-asset" key={asset.name}>
             <img src={asset.url} alt={`${asset.title}, original synthetic test scene`} loading="lazy" />
-            <div><span className="eyebrow">{asset.provenance === "synthetic_packing" ? "SYNTHETIC PACKING" : "TEST FIXTURE"}</span><h3>{asset.title}</h3><p>{asset.description}</p>
+            <div><span className="eyebrow">{asset.provenance === "synthetic_claude" ? "CLAUDE AI · SYNTHETIC" : asset.provenance === "synthetic_packing" ? "SYNTHETIC PACKING" : "TEST FIXTURE"}</span><h3>{asset.title}</h3><p>{asset.description}</p>
               {canUse ? (
                 <Button asChild size="sm" variant="outline"><Link to={`/inspection?${query}`}>
                   Use in inspection <ArrowRight size={14} aria-hidden="true" /></Link></Button>

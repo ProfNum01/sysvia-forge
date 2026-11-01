@@ -156,6 +156,17 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertIsNone(result["regions"][0]["candidate_product_id"])
         self.assertIsNone(result["regions"][0]["product_id"])
 
+    def test_visual_candidate_guides_sam_without_confirming_sku(self):
+        row = {**observation(), "product_id": None, "identity_certain": False,
+               "label_text": "unreadable", "visual_candidate_product_id": "p2",
+               "visual_evidence": "Red box shape resembles the catalog reference"}
+        result = self.run_pipeline([row])
+        calls = [entry for entry in self.timeline if isinstance(entry, tuple) and entry[0] == "actual-sam-call"]
+        self.assertEqual(calls[0][1], "a red cardboard box")
+        self.assertEqual(result["regions"][0]["candidate_product_id"], "p2")
+        self.assertIsNone(result["regions"][0]["product_id"])
+        self.assertEqual(result["observations"][0]["identification_status"], "UNIDENTIFIED")
+
     def test_failed_muse_does_not_request_sam(self):
         result = self.run_pipeline([], muse_ok=False)
         self.assertIsNone(result["sam"])

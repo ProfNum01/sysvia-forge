@@ -150,7 +150,9 @@ class VisualInspectionTests(unittest.TestCase):
         service = self.service(json.dumps({"observations": [self.observation]}))
         result = service.inspect_image(self.image, self.catalog)
         self.assertTrue(result["ok"])
-        self.assertEqual(result["observations"], [{**self.observation, "source_box": None, "evidence_region_ids": []}])
+        self.assertEqual(result["observations"], [{**self.observation, "source_box": None,
+                                                   "visual_candidate_product_id": None, "visual_evidence": "",
+                                                   "evidence_region_ids": []}])
         self.assertEqual(result["usage"]["total_tokens"], 30)
         self.assertEqual(result["http_status"], 200)
         request = self.requests[0]

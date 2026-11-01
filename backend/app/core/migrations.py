@@ -5,6 +5,8 @@ from sqlalchemy.schema import CreateTable
 
 def upgrade_local_schema(engine):
     columns = {
+        "products": {"registered_reference_path": "TEXT", "reference_provenance": "VARCHAR",
+                     "visible_label": "VARCHAR", "barcode": "VARCHAR"},
         "inspections": {
             "requirements_revision": "VARCHAR(64)",
             "order_version": "INTEGER",
@@ -21,6 +23,7 @@ def upgrade_local_schema(engine):
         "inspection_observations": {
             "sku": "VARCHAR", "identification_status": "VARCHAR NOT NULL DEFAULT 'UNCERTAIN'",
             "evidence_region_ids": "JSON NOT NULL DEFAULT '[]'",
+            "visual_candidate_product_id": "VARCHAR", "visual_evidence": "TEXT NOT NULL DEFAULT ''",
         },
         "orders": {"version": "INTEGER NOT NULL DEFAULT 1",
                    "shipping_status": "VARCHAR NOT NULL DEFAULT 'NOT_READY'",

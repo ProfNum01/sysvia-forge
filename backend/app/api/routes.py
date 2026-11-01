@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hmac
+import io
 import json
+import math
 import re
 import time
 from collections import Counter
@@ -9,7 +11,8 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from PIL import Image
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import object_session
@@ -44,6 +47,7 @@ PACKING_ASSETS = {
     "packing-extra-before": ("Extra cube · before", "03_extra_product_before.png"),
     "packing-extra-after": ("Extra cube · after", "04_extra_product_after.png"),
 }
+CLAUDE_ASSETS = {"claude-missing-before": ("Claude labeled missing pouch · before", "missing-before.png")}
 
 
 def database(request: Request):
@@ -120,16 +124,21 @@ def demo_assets():
             for name, (title, description) in DEMO_ASSETS.items()
             if (folder / f"task002-{name}.png").is_file()]
     packing = ROOT / "evaluation" / "datasets" / "synthetic-packing"
+    claude = ROOT / "evaluation" / "datasets" / "synthetic-claude-labeled"
     return original + [{"name": name, "title": title, "description": "SYNTHETIC packing scene; SKU identity is not visually proven.",
                         "provenance": "synthetic_packing", "url": f"/api/demo/assets/{name}"}
-                       for name, (title, filename) in PACKING_ASSETS.items() if (packing / filename).is_file()]
+                       for name, (title, filename) in PACKING_ASSETS.items() if (packing / filename).is_file()] + [
+                       {"name": name, "title": title, "description": "Claude AI generated labeled scene; model identity and counts require live inspection.",
+                        "provenance": "synthetic_claude", "url": f"/api/demo/assets/{name}"}
+                       for name, (title, filename) in CLAUDE_ASSETS.items() if (claude / filename).is_file()]
 
 
 @router.get("/demo/assets/{name}")
 def demo_asset(name: str):
-    if name not in DEMO_ASSETS and name not in PACKING_ASSETS:
+    if name not in DEMO_ASSETS and name not in PACKING_ASSETS and name not in CLAUDE_ASSETS:
         raise HTTPException(404, "Demo asset was not found.")
-    path = (ROOT / "evaluation" / "datasets" / "synthetic-packing" / PACKING_ASSETS[name][1]
+    path = (ROOT / "evaluation" / "datasets" / "synthetic-claude-labeled" / CLAUDE_ASSETS[name][1]
+            if name in CLAUDE_ASSETS else ROOT / "evaluation" / "datasets" / "synthetic-packing" / PACKING_ASSETS[name][1]
             if name in PACKING_ASSETS else ROOT / "data" / "fixtures" / f"task002-{name}.png")
     if not path.is_file():
         raise HTTPException(404, "Demo asset is unavailable on this installation.")
@@ -138,12 +147,13 @@ def demo_asset(name: str):
 
 
 @router.get("/products/{product_id}/reference")
-def product_reference(request: Request, product_id: str, db=Depends(database)):
+def product_reference(request: Request, product_id: str, actor=Depends(supervisor), db=Depends(database)):
     product = required(db, Product, product_id)
-    path = reference_path(request.app.state.settings.data_dir, product.id, product.sku)
+    path = reference_path(request.app.state.settings.data_dir, product.id, product.sku,
+                          product.registered_reference_path)
     if path is None or not path.is_file():
         raise HTTPException(404, "A rights-cleared product reference is not available.")
-    return FileResponse(path, media_type="image/png", headers={"X-Content-Type-Options": "nosniff"})
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/orders/{order_id}", response_model=OrderOut)
@@ -381,6 +391,25 @@ def annotation_file(inspection_id: str, actor=Depends(supervisor), db=Depends(da
     return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
+@router.get("/inspections/{inspection_id}/regions/{region_id}/crop")
+def region_crop(inspection_id: str, region_id: str, actor=Depends(supervisor), db=Depends(database)):
+    inspection = required(db, Inspection, inspection_id)
+    region = next((row for row in inspection.regions if row.get("id") == region_id and row.get("source") == "sam-3.1"), None)
+    if region is None:
+        raise HTTPException(404, "SAM region was not found for this inspection.")
+    box = region["box"]
+    bounds = (max(0, math.floor(box["left"])), max(0, math.floor(box["top"])),
+              min(inspection.image_width, math.ceil(box["right"])),
+              min(inspection.image_height, math.ceil(box["bottom"])))
+    if bounds[0] >= bounds[2] or bounds[1] >= bounds[3]:
+        raise HTTPException(422, "Stored SAM region has invalid geometry.")
+    with Image.open(inspection.image_path) as source:
+        output = io.BytesIO()
+        source.crop(bounds).save(output, format="PNG")
+    output.seek(0)
+    return StreamingResponse(output, media_type="image/png", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+
 def fail_provider(db, inspection, category, http_status=502, provider_http_status=None):
     db.expire_all()
     inspection = required(db, Inspection, inspection.id)
@@ -426,10 +455,14 @@ def analyze(request: Request, inspection_id: str, actor=Depends(supervisor), db=
         inspection.processing_stage = "ANALYSIS_STARTED"
         audit(db, "ANALYSIS_STARTED", inspection.id, {"photo_id": inspection.photo_id}, actor=actor)
         db.commit()
-        catalog_prefix = "packing-" if order.id.startswith("order-packing-") else "product-"
+        catalog_prefix = ("claude-" if order.data_source == "synthetic_claude" else
+                          "physical-" if order.data_source == "physical_capture" else
+                          "packing-" if order.id.startswith("order-packing-") else "product-")
         products = [{"id": p.id, "sku": p.sku, "name": p.name, "color": p.color, "description": p.description,
-                     "reference_image_path": str(reference_path(request.app.state.settings.data_dir, p.id, p.sku))
-                         if reference_path(request.app.state.settings.data_dir, p.id, p.sku) else None}
+                     "reference_image_path": str(reference_path(request.app.state.settings.data_dir, p.id, p.sku,
+                                                                  p.registered_reference_path))
+                         if reference_path(request.app.state.settings.data_dir, p.id, p.sku,
+                                           p.registered_reference_path) else None}
                     for p in db.scalars(select(Product).where(Product.id.like(f"{catalog_prefix}%")).order_by(Product.id).limit(4))]
     allowed_events = {"MUSE_ANALYSIS_STARTED", "MUSE_ANALYSIS_COMPLETED",
                       "SAM_SEGMENTATION_STARTED", "SAM_SEGMENTATION_COMPLETED"}
@@ -481,6 +514,9 @@ def analyze(request: Request, inspection_id: str, actor=Depends(supervisor), db=
             known_ids = {p["id"] for p in products}
             if len(regions) > 2000 or len(observations) > 1000:
                 raise ValueError("Oversized perception result")
+            if any(row.get("visual_candidate_product_id") is not None and
+                   row["visual_candidate_product_id"] not in known_ids for row in observations):
+                raise ValueError("Unknown visual candidate")
             for region in regions:
                 boxes = [region["box"]] + ([region["mask"]["bounds"]] if region["mask"] else [])
                 if (any(b["right"] > inspection.image_width or b["bottom"] > inspection.image_height for b in boxes)

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ProofSight physical product labels</title>
+<style>
+@page { size: A4 portrait; margin: 10mm; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Arial, sans-serif; color: #111; }
+main { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 7mm; height: 277mm; }
+.label { border: 2.5mm solid #111; padding: 9mm 5mm; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; break-inside: avoid; }
+.sku { font-size: 35pt; font-weight: 900; line-height: 1.05; overflow-wrap: anywhere; }
+.product { margin-top: 10mm; font-size: 21pt; font-weight: 700; }
+.cue { margin-top: 7mm; width: 22mm; height: 22mm; border: 2mm solid #111; }
+.blue .cue { background: #1976d2; } .red .cue { background: #d32f2f; }
+.yellow .cue { background: #ffde00; } .green .cue { background: #198754; }
+@media screen { body { background: #ddd; padding: 15px; } main { width: 210mm; height: 297mm; padding: 10mm; margin: auto; background: white; box-shadow: 0 4px 25px #777; } }
+</style>
+</head>
+<body><main>
+<section class="label blue"><div class="sku">BLUE-BOX</div><div class="product">Blue Box</div><div class="cue"></div></section>
+<section class="label red"><div class="sku">RED-CAN</div><div class="product">Red Can</div><div class="cue"></div></section>
+<section class="label yellow"><div class="sku">YELLOW-POUCH</div><div class="product">Yellow Pouch</div><div class="cue"></div></section>
+<section class="label green"><div class="sku">GREEN-CUBE</div><div class="product">Green Cube</div><div class="cue"></div></section>
+</main></body></html>

@@ -27,8 +27,9 @@ def run_visual_models(image_path: str, products: list[dict], annotation_path: Pa
         return {"muse": muse, "sam": None, "regions": [], "observations": []}
 
     catalog = {product["id"]: product for product in products}
-    candidates = list(dict.fromkeys(row.get("product_id") for row in muse.get("observations", [])
-                                   if row.get("product_id") in catalog))
+    candidates = list(dict.fromkeys((row.get("product_id") or row.get("visual_candidate_product_id"))
+                                   for row in muse.get("observations", [])
+                                   if (row.get("product_id") or row.get("visual_candidate_product_id")) in catalog))
     try:
         sam_budget = min(4, max(0, int(os.getenv("PROOFSIGHT_SAM_REQUEST_BUDGET", "4"))))
     except ValueError:

@@ -33,6 +33,15 @@ test.describe("SYSVIA ProofSight — Final Release Hardening E2E", () => {
     await page.waitForTimeout(500);
   });
 
+  test("Claude synthetic dataset shows saved image without claiming model results", async ({ page }) => {
+    await page.goto("/demo");
+    await page.selectOption("#demo-order", "claude-order-bfba94cb9736d855");
+    await expect(page.getByText("CLAUDE AI · SYNTHETIC")).toBeVisible();
+    await expect(page.getByText("Claude labeled missing pouch · before")).toBeVisible();
+    await expect(page.getByText("Shipping: Not ready")).toBeVisible();
+    await expect(page.getByRole("link", { name: /Open inspection evidence/ })).toBeVisible();
+  });
+
   test("TASK 1 & 4 — Security Integration & Demo Workspace Reliability", async ({ page, request }) => {
     // 1. Verify unauthenticated access to protected endpoints is blocked with 403
     const unauthImage = await request.get("/api/inspections/3dbdd268-af2c-4beb-bef1-edaf1c17c962/image");

@@ -1,5 +1,11 @@
 # Hackathon contributions
 
+## 2026-11-01 — Task 010 physical identity preparation
+
+- Added strict local registration for owner-supplied `PHYSICAL_CAPTURE` product references and distinct before/after images. Registration requires explicit rights, visible SKU labels, owner-provided inventory, and a matching order; it creates no inspection or inferred result. Added a private physical dataset import location and validation-only CLI mode.
+- Separated visual catalog candidates from confirmed SKU identity in Muse observations. A candidate can guide a SAM prompt, but deterministic grounding still requires an exact readable scene SKU and matching SAM region. Added an authenticated on-demand crop endpoint using only saved SAM geometry. Physical catalog references now require operator authorization.
+- Added physical order selection in the existing Demo Workspace without serving physical photos as public demo assets. The inspection page displays reference provenance, visual candidate evidence, and guidance to capture readable labels. No owner physical images were present, so no new live Meta call or physical correction was performed.
+
 ## 2026-11-01 — Visual accuracy recovery
 
 - Reviewed both prior live packing benchmark records before making new provider calls. Their comparisons contained no grounded SKU quantities; the raw Muse and SAM outputs had not been retained. Confirmed all four source scenes pass local quality checks and the isolated packing catalog does not reuse incompatible original references.
@@ -104,3 +110,12 @@
 - Added local image-quality measurements and a conservative gate before paid inference. Low resolution, severe low light, or severe overexposure blocks analysis and holds shipping; uncertain glare or texture is a review warning. The four supplied packing images passed this local gate. Added quality display in Visual Inspection.
 - Ran two live Meta inspections, one per packing-before scenario. Both returned `NEEDS_REVIEW` with five completed read-tool calls each. Records show 2 Muse, 2 SAM, and 8 agent model starts in total: 12 paid model requests. Inspection latencies were 19,253 ms and 18,743 ms. Both cases remained unverified; no shipping safety violation was observed. The after images received no live inference.
 - Added reproducible JSON/CSV aggregation, adjusted the browser walkthrough to distinguish expected anonymous 403 responses from authenticated console errors, and updated the demo script/shot list to remove unsupported physical and certainty claims. Backend tests: 142 passed, 45 subtests; frontend tests: 23 passed; production build and Playwright (2/2) passed. Existing read-only browser E2E: nine phases passed. Physical correction, full approval/reinspection for the new pairs, and a final video remain unvalidated.
+# 2026-11-01 — Task 011 physical capture preparation
+
+- Added printable A4 labels and a private physical dataset import template with exact reference/before filenames. Template deliberately lacks rights confirmation, stock values, and captures; registration cannot proceed without owner evidence.
+- Allowed registration before correction when `after_image` is empty; if supplied, before and after images must have different contents. No physical photographs were created or imported, and no live Meta requests were made in this task.
+- Physical registration, SKU recognition, missing-product detection, approval, and before/after verification remain blocked by owner camera captures and actual inventory details.
+# 2026-11-01 — Claude synthetic provenance correction
+
+- Moved five owner-confirmed Claude AI generated PNGs unchanged from the physical capture staging folder to `evaluation/datasets/synthetic-claude-labeled/`; SHA-256 hashes were preserved. Added an explicit `SYNTHETIC` manifest with fictional inventory of 10 per SKU and a separate order.
+- Added isolated synthetic registration, references, and a Demo Workspace scene entry. Registered four products with fictional test inventory of 10 each and uploaded the before image as an `UPLOADED` inspection; no model analysis was run. Physical registration rules were preserved. No new paid Meta inference was authorized; existing live records did not match the new before-image hash. Physical validation remains blocked.

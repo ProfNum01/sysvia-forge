@@ -1358,6 +1358,11 @@ function InspectionPage() {
                       </div>
                     </div>
                   )}
+                  {current.observations.some((observation) => !observation.identity_certain) && (
+                    <div className="inline-note" role="status"><CircleAlert size={16} aria-hidden="true" />
+                      <p>Product identity is unconfirmed. Capture a closer view with each SKU label readable and products separated. A sharp image alone does not establish SKU identity.</p>
+                    </div>
+                  )}
                   {current.provider_error && (
                     <div className="error-state" role="alert">
                       <CircleAlert size={19} aria-hidden="true" />
@@ -1491,12 +1496,8 @@ function InspectionPage() {
                 {selected.items.map((item) => (
                   <div className="manifest-item" key={item.id}>
                     {item.product.reference_image_url ? (
-                      <img
-                        className="product-reference"
-                        src={item.product.reference_image_url}
-                        alt={`Synthetic catalog reference for ${item.product.sku}`}
-                        loading="lazy"
-                      />
+                      <ProductReference path={item.product.reference_image_url}
+                        alt={`Catalog reference for ${item.product.sku}`} />
                     ) : (
                       <div className="product-cube">
                         <Box size={20} aria-hidden="true" />
@@ -1513,6 +1514,9 @@ function InspectionPage() {
                         <span className="reference-source-badge">
                           Synthetic catalog reference
                         </span>
+                      )}
+                      {item.product.reference_source === "PHYSICAL_CAPTURE" && (
+                        <span className="reference-source-badge">Owner physical reference · label {item.product.visible_label}</span>
                       )}
                     </div>
                     <span className="quantity">×{item.quantity}</span>
@@ -1624,6 +1628,7 @@ function InspectionResults({
                         {o.label_text || o.product_id || "Unidentified item"}
                       </strong>
                       <p>{o.evidence}</p>
+                      {o.visual_candidate_product_id && <p>Visual candidate: {i.comparison?.find(row => row.product_id === o.visual_candidate_product_id)?.sku ?? o.visual_candidate_product_id}. {o.visual_evidence} SKU remains unconfirmed until its visible label and region agree.</p>}
                     </div>
                     <span className="observation-count">
                       {o.count_certain && o.quantity != null
@@ -1715,6 +1720,14 @@ function ProtectedEvidenceImage({ path, alt }: { path?: string | null; alt: stri
   return <a href={image.url} target="_blank" rel="noreferrer" aria-label={`Open ${alt}`}>
     <img src={image.url} alt={alt} loading="lazy" />
   </a>;
+}
+function ProductReference({ path, alt }: { path: string; alt: string }) {
+  const { token } = useContext(TokenContext);
+  const image = useProtectedImage(path, token);
+  return image.url ? <img className="product-reference" src={image.url} alt={alt} loading="lazy" /> :
+    <div className="product-cube" role="status" aria-label={image.error || "Loading authorized product reference"}>
+      <Box size={20} aria-hidden="true" />
+    </div>;
 }
 function VerificationComparison({ inspection }: { inspection: Inspection }) {
   const { token } = useContext(TokenContext);

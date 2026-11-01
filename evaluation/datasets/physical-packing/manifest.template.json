@@ -1,0 +1,14 @@
+{
+  "dataset_id": "",
+  "provenance": "PHYSICAL_CAPTURE",
+  "rights_confirmed": false,
+  "products": [
+    {"sku": "BLUE-BOX", "name": "Blue Box", "reference_image": "reference-blue.png", "visible_label": "BLUE-BOX", "inventory_quantity": null, "inventory_location": ""},
+    {"sku": "RED-CAN", "name": "Red Can", "reference_image": "reference-red.png", "visible_label": "RED-CAN", "inventory_quantity": null, "inventory_location": ""},
+    {"sku": "YELLOW-POUCH", "name": "Yellow Pouch", "reference_image": "reference-yellow.png", "visible_label": "YELLOW-POUCH", "inventory_quantity": null, "inventory_location": ""},
+    {"sku": "GREEN-CUBE", "name": "Green Cube", "reference_image": "reference-green.png", "visible_label": "GREEN-CUBE", "inventory_quantity": null, "inventory_location": ""}
+  ],
+  "order": {"reference": "", "items": {"BLUE-BOX": 2, "RED-CAN": 1, "YELLOW-POUCH": 1}},
+  "before_image": "missing-before.png",
+  "after_image": ""
+}

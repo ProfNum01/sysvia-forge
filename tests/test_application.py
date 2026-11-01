@@ -82,8 +82,9 @@ class ApplicationTests(unittest.TestCase):
         self.assertEqual(assets.status_code, 200)
         self.assertTrue(any(row["name"] == "missing" for row in assets.json()))
         for row in assets.json():
-            self.assertIn(row["provenance"], {"original_synthetic_fixture", "synthetic_packing"})
+            self.assertIn(row["provenance"], {"original_synthetic_fixture", "synthetic_packing", "synthetic_claude"})
             self.assertEqual(row["provenance"] == "synthetic_packing", row["name"].startswith("packing-"))
+            self.assertEqual(row["provenance"] == "synthetic_claude", row["name"].startswith("claude-"))
             image = self.client.get(row["url"])
             self.assertEqual(image.status_code, 200)
             self.assertTrue(image.content.startswith(b"\x89PNG"))

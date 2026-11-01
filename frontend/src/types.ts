@@ -5,7 +5,9 @@ export type Product = {
   color?: string;
   description?: string;
   reference_image_url?: string | null;
-  reference_source?: "original_synthetic_reference" | null;
+  reference_source?: "original_synthetic_reference" | "PHYSICAL_CAPTURE" | null;
+  visible_label?: string | null;
+  barcode?: string | null;
 };
 export type Order = {
   id: string;
@@ -47,6 +49,8 @@ export type Observation = {
   sku?: string | null;
   identification_status?: "MATCHED" | "UNCERTAIN" | "UNIDENTIFIED";
   evidence_region_ids?: string[];
+  visual_candidate_product_id?: string | null;
+  visual_evidence?: string;
 };
 export type Discrepancy = {
   id: string;
@@ -218,6 +222,6 @@ export type DemoAsset = {
   name: string;
   title: string;
   description: string;
-    provenance: "original_synthetic_fixture" | "synthetic_packing";
+    provenance: "original_synthetic_fixture" | "synthetic_packing" | "synthetic_claude";
   url: string;
 };

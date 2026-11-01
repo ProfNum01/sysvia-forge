@@ -28,16 +28,20 @@ class Product(Base):
     name: Mapped[str] = mapped_column(String)
     color: Mapped[str] = mapped_column(String)
     description: Mapped[str] = mapped_column(Text)
+    registered_reference_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reference_provenance: Mapped[str | None] = mapped_column(String, nullable=True)
+    visible_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    barcode: Mapped[str | None] = mapped_column(String, nullable=True)
 
     @property
     def reference_image_url(self):
         from backend.app.services.catalog import REFERENCE_CATALOG
         item = REFERENCE_CATALOG.get(self.id)
-        return f"/api/products/{self.id}/reference" if item and item["sku"] == self.sku else None
+        return f"/api/products/{self.id}/reference" if self.registered_reference_path or (item and item["sku"] == self.sku) else None
 
     @property
     def reference_source(self):
-        return "original_synthetic_reference" if self.reference_image_url else None
+        return self.reference_provenance or ("original_synthetic_reference" if self.reference_image_url else None)
 
 
 class Order(Base):
@@ -130,6 +134,8 @@ class InspectionObservation(Base):
     sku: Mapped[str | None] = mapped_column(String, nullable=True)
     identification_status: Mapped[str] = mapped_column(String, default="UNCERTAIN")
     evidence_region_ids: Mapped[list] = mapped_column(JSON, default=list)
+    visual_candidate_product_id: Mapped[str | None] = mapped_column(ForeignKey("products.id"), nullable=True)
+    visual_evidence: Mapped[str] = mapped_column(Text, default="")
 
 
 class Discrepancy(Base):

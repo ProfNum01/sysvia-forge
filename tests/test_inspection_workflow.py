@@ -111,6 +111,19 @@ class InspectionWorkflowTests(unittest.TestCase):
         self.assertEqual({product["id"] for product in requests[0][1]},
                          {"product-red", "product-blue", "product-amber", "product-green"})
 
+    def test_region_crop_uses_saved_sam_box_and_requires_authorization(self):
+        inspection = self.upload().json()
+        analyzed = self.analyze(inspection["id"], grounded_visual_result())
+        self.assertEqual(analyzed.status_code, 200)
+        region_id = analyzed.json()["regions"][0]["id"]
+        url = f"/api/inspections/{inspection['id']}/regions/{region_id}/crop"
+        self.assertEqual(self.client.get(url, headers={"Authorization": ""}).status_code, 403)
+        crop = self.client.get(url, headers=self.auth)
+        self.assertEqual(crop.status_code, 200)
+        with Image.open(io.BytesIO(crop.content)) as image:
+            self.assertEqual(image.size, (6, 6))
+        self.assertEqual(self.client.get(url + "-unknown", headers=self.auth).status_code, 404)
+
     def test_quality_gate_blocks_paid_inference_and_shipping(self):
         from dataclasses import replace
         self.app.state.settings = replace(self.settings, quality_gate_enabled=True)

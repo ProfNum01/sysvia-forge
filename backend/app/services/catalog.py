@@ -10,7 +10,12 @@ REFERENCE_CATALOG = {
 }
 
 
-def reference_path(data_dir, product_id, sku):
+def reference_path(data_dir, product_id, sku, registered_reference_path=None):
+    if registered_reference_path:
+        candidate = Path(registered_reference_path).resolve()
+        roots = ((Path(data_dir) / "physical_references").resolve(),
+                 (Path(data_dir) / "synthetic_references").resolve())
+        return candidate if any(candidate.is_relative_to(root) for root in roots) and candidate.is_file() else None
     item = REFERENCE_CATALOG.get(product_id)
     if not item or item["sku"] != sku:
         return None

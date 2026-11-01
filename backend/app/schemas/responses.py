@@ -16,6 +16,8 @@ class ProductOut(FromORM):
     description: str
     reference_image_url: str | None = None
     reference_source: str | None = None
+    visible_label: str | None = None
+    barcode: str | None = None
 
 
 class PixelBox(BaseModel):
@@ -63,6 +65,8 @@ class ObservationInput(BaseModel):
     identification_status: Literal["MATCHED", "UNCERTAIN", "UNIDENTIFIED"] = "UNCERTAIN"
     evidence_region_ids: list[str] = Field(default_factory=list, max_length=100)
     source_box: PixelBox | None = None
+    visual_candidate_product_id: str | None = None
+    visual_evidence: str = Field(default="", max_length=2000)
 
 
 class ComparisonOut(BaseModel):
@@ -116,6 +120,8 @@ class ObservationOut(FromORM):
     sku: str | None
     identification_status: Literal["MATCHED", "UNCERTAIN", "UNIDENTIFIED"]
     evidence_region_ids: list[str]
+    visual_candidate_product_id: str | None = None
+    visual_evidence: str = ""
 
 
 class DiscrepancyOut(FromORM):

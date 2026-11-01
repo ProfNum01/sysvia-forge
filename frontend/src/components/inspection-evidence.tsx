@@ -268,6 +268,9 @@ export function EvidenceViewer({
           ))}
         </div>
       )}
+      {regions.filter((region) => selectedRegionIds.includes(region.id)).map((region) => (
+        <RegionCrop key={region.id} inspectionId={inspection.id} regionId={region.id} token={token} />
+      ))}
       {!regions.length && (
         <p className="form-hint">
           No renderable SAM regions are recorded for this inspection. No
@@ -276,6 +279,16 @@ export function EvidenceViewer({
       )}
     </div>
   );
+}
+
+function RegionCrop({ inspectionId, regionId, token }: { inspectionId: string; regionId: string; token: string }) {
+  const path = `/api/inspections/${encodeURIComponent(inspectionId)}/regions/${encodeURIComponent(regionId)}/crop`;
+  const image = useProtectedImage(path, token);
+  return <div className="viewer-evidence-caption" role="status">
+    <span>SAM region crop · {regionId} · geometry only, SKU unconfirmed</span>
+    {image.url ? <img src={image.url} alt={`Actual SAM crop ${regionId}`} style={{ maxWidth: 240, maxHeight: 240 }} /> :
+      <span>{image.error || "Loading authorized crop…"}</span>}
+  </div>;
 }
 
 export function ProductComparison({
