@@ -52,6 +52,7 @@ PACKING_ASSETS = {
     "packing-extra-after": ("Extra cube · after", "04_extra_product_after.png"),
 }
 CLAUDE_ASSETS = {"claude-missing-before": ("Claude labeled missing pouch · before", "missing-before.png")}
+TEN_ORDER_ASSETS = {f"ten-order-{n:02d}": (f"TEN-ORDER-{n:02d} whole order", f"TEN-ORDER-{n:02d}.png") for n in range(1, 11)}
 
 
 def database(request: Request):
@@ -138,14 +139,19 @@ def demo_assets():
                        for name, (title, filename) in PACKING_ASSETS.items() if (packing / filename).is_file()] + [
                        {"name": name, "title": title, "description": "Claude AI generated labeled scene; model identity and counts require live inspection.",
                         "provenance": "synthetic_claude", "url": f"/api/demo/assets/{name}"}
-                       for name, (title, filename) in CLAUDE_ASSETS.items() if (claude / filename).is_file()]
+                       for name, (title, filename) in CLAUDE_ASSETS.items() if (claude / filename).is_file()] + [
+                       {"name": name, "title": title, "description": "Generated synthetic whole-order scene; requires live visual inspection.",
+                        "provenance": "synthetic_claude", "url": f"/api/demo/assets/{name}"}
+                       for name, (title, filename) in TEN_ORDER_ASSETS.items()
+                       if (ROOT / "evaluation" / "datasets" / "ten-orders" / "images" / filename).is_file()]
 
 
 @router.get("/demo/assets/{name}")
 def demo_asset(name: str):
-    if name not in DEMO_ASSETS and name not in PACKING_ASSETS and name not in CLAUDE_ASSETS:
+    if name not in DEMO_ASSETS and name not in PACKING_ASSETS and name not in CLAUDE_ASSETS and name not in TEN_ORDER_ASSETS:
         raise HTTPException(404, "Demo asset was not found.")
-    path = (ROOT / "evaluation" / "datasets" / "synthetic-claude-labeled" / CLAUDE_ASSETS[name][1]
+    path = (ROOT / "evaluation" / "datasets" / "ten-orders" / "images" / TEN_ORDER_ASSETS[name][1]
+            if name in TEN_ORDER_ASSETS else ROOT / "evaluation" / "datasets" / "synthetic-claude-labeled" / CLAUDE_ASSETS[name][1]
             if name in CLAUDE_ASSETS else ROOT / "evaluation" / "datasets" / "synthetic-packing" / PACKING_ASSETS[name][1]
             if name in PACKING_ASSETS else ROOT / "data" / "fixtures" / f"task002-{name}.png")
     if not path.is_file():

@@ -237,3 +237,16 @@
 - Generated ten original deterministic whole-order PNG illustrations and ten matching order JSON manifests using the four fictional SKU labels. Six depict correct orders and four depict distinct conflicts.
 - Added a benchmark-format index, generator script, dataset provenance notes, and an offline completeness test. No application order, inspection, verified state, or Meta inference was created.
 
+
+# 2026-11-01 — Register ten synthetic orders in local app
+
+- Registered the ten generated order manifests against the existing four synthetic products in the local SQLite database. Registration is validated, idempotent, audited, and creates no inspections or verification claims.
+- Added matching image assets to the backend and filtered the demo workspace so each new order displays its own whole-order scene. Rebuilt local Docker services and confirmed ten orders, ten assets, and image HTTP 200 through the running API.
+- Backed up the local database to ignored data/proofsight.pre-ten-orders.db before registration. No Meta requests were made.
+
+
+# 2026-11-01 — Demo Workspace presentation refresh
+
+- Reworked the existing Demo Workspace as a read-only system tour: closed-loop stages, current dashboard counts, recorded order status, and each order's synthetic scene, with links to the operational workspaces.
+- Preserved provenance and evidence boundaries. Live inference badges now require saved completion events; an uploaded inspection alone is not presented as a completed model run. No Meta request or workflow mutation was added to the tour.
+

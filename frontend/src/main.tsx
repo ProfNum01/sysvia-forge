@@ -2376,8 +2376,8 @@ function Demo() {
   return <>
     <PageHeading
       eyebrow="CONTROLLED PRESENTATION"
-      title="Demo Workspace"
-      description="Run the real ProofSight workflow with rights-cleared synthetic scenes and isolated seed orders."
+      title="ProofSight System Tour"
+      description="Present the closed-loop workflow, then explore recorded orders and synthetic scenes."
       accent="rose"
       badge="SANDBOX DEMO"
     />

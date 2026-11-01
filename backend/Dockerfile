@@ -8,6 +8,7 @@ COPY scripts ./scripts
 COPY evaluation/manifests/synthetic-packing.json ./evaluation/manifests/synthetic-packing.json
 COPY evaluation/datasets/synthetic-packing ./evaluation/datasets/synthetic-packing
 COPY evaluation/datasets/synthetic-claude-labeled ./evaluation/datasets/synthetic-claude-labeled
+COPY evaluation/datasets/ten-orders ./evaluation/datasets/ten-orders
 RUN useradd --create-home proofsight && mkdir /app/data && chown proofsight /app/data
 USER proofsight
 EXPOSE 8000

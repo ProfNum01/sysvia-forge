@@ -5,6 +5,22 @@ import { MemoryRouter } from "react-router-dom";
 import { DemoWorkspace } from "./demo-workspace";
 
 describe("DemoWorkspace", () => {
+  it("presents the real system journey and live summary without claiming synthetic evidence is verified", () => {
+    const client = new QueryClient();
+    client.setQueryData(["orders"], [{ id: "ten-order-01", reference: "TEN-ORDER-01", data_source: "synthetic_claude", status: "PENDING_INSPECTION", shipping_status: "NOT_READY", latest_inspection_id: null, items: [{ product: { sku: "BLUE-BOX" }, quantity: 1 }] }]);
+    client.setQueryData(["dashboard-summary"], { total_orders: 10, pending_inspections: 8, verified_orders: 0, active_discrepancies: 0, orders_on_hold: 0, pending_human_reviews: 0 });
+    client.setQueryData(["demo-assets"], [{ name: "ten-order-01", title: "TEN-ORDER-01 whole order", description: "Synthetic scene", url: "/api/demo/assets/ten-order-01", provenance: "synthetic_claude" }]);
+    client.setQueryData(["meta-status"], { configured: true });
+    const html = renderToStaticMarkup(<QueryClientProvider client={client}><MemoryRouter><DemoWorkspace token="test-token" /></MemoryRouter></QueryClientProvider>);
+    expect(html).toContain("How ProofSight works");
+    expect(html).toContain("Orders in workspace");
+    expect(html).toContain("TEN-ORDER-01");
+    expect(html).toContain("/api/demo/assets/ten-order-01");
+    expect(html).toContain("/operations");
+    expect(html).toContain("/history");
+    expect(html).toContain("Synthetic illustration");
+    expect(html).not.toContain("Recorded live inference");
+  });
   it("shows a recorded Claude judge path only from persisted inspection evidence", () => {
     const client = new QueryClient();
     const inspectionId = "saved-inspection";
