@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 import time
 from PIL import Image
@@ -110,7 +111,7 @@ def metrics(rows):
             "discrepancy_detection_recall_percent": pct(true_positive, true_positive + false_negative)}
 
 
-def run_live(case, token):
+def run_live(case, token, *, investigate=True):
     from fastapi.testclient import TestClient
     from sqlalchemy import select
     from backend.app.core.config import Settings
@@ -142,6 +143,11 @@ def run_live(case, token):
             result = {"inspection_id": inspection_id, "inspection_status": saved.get("status"),
                       "actual_discrepancies": sorted({d["type"] for d in saved.get("discrepancies", [])}),
                       "comparison": saved.get("comparison", []),
+                      "observations": saved.get("observations", []),
+                      "regions": [{"id": r.get("id"), "box": r.get("box"),
+                                   "candidate_product_id": r.get("candidate_product_id"),
+                                   "product_id": r.get("product_id")} for r in saved.get("regions", [])],
+                      "segmentation_box_count": sum(len(s.get("boxes", [])) for s in saved.get("segmentations", [])),
                       "shipping_status": order.get("shipping_status"),
                       "models": saved.get("provider_metadata", {}), "analysis_http_status": analyzed.status_code}
             if analyzed.status_code != 200:
@@ -151,7 +157,7 @@ def run_live(case, token):
             result["outcome"] = ("PASS" if saved.get("status") == "VERIFIED" and not case["expected_discrepancy"]
                                  else "MISMATCH_DETECTED" if saved.get("reconciliation_status") == "MISMATCH_DETECTED"
                                  else "NEEDS_HUMAN_REVIEW")
-            if saved.get("discrepancies"):
+            if saved.get("discrepancies") and investigate:
                 started = time.monotonic()
                 investigation = client.post(f"/api/inspections/{inspection_id}/investigate", headers=headers)
                 result["investigation_seconds"] = round(time.monotonic() - started, 3)
@@ -190,10 +196,20 @@ def main(argv=None):
     parser.add_argument("--scenario", action="append")
     parser.add_argument("--live", action="store_true", help="Explicitly authorize paid Meta inspection calls")
     parser.add_argument("--max-live-requests", type=int, default=1, help="Maximum inspection attempts; 1 by default, at most 6")
+    parser.add_argument("--skip-investigation", action="store_true", help="Inspect only; no agent model requests")
+    parser.add_argument("--max-sam-requests", type=int, default=4, help="SAM request cap per inspection, 0 to 4")
+    parser.add_argument("--paid-request-budget", type=int, default=12, help="Preflight upper bound for paid model requests")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "evaluation/results")
     args = parser.parse_args(argv)
     if not 0 <= args.max_live_requests <= 6:
         parser.error("--max-live-requests must be between 0 and 6")
+    if not 0 <= args.max_sam_requests <= 4:
+        parser.error("--max-sam-requests must be between 0 and 4")
+    upper_bound = args.max_live_requests * (1 + args.max_sam_requests + (0 if args.skip_investigation else 4))
+    if args.live and (args.paid_request_budget < 1 or upper_bound > args.paid_request_budget):
+        parser.error("The configured paid request upper bound exceeds --paid-request-budget")
+    if args.live:
+        os.environ["PROOFSIGHT_SAM_REQUEST_BUDGET"] = str(args.max_sam_requests)
     document = validate_manifest(args.dataset.resolve())
     cases = [c for c in document["cases"] if not args.scenario or c["scenario_id"] in args.scenario]
     if not cases:
@@ -220,7 +236,7 @@ def main(argv=None):
                "expected_verification_policy": case["expected_verification_policy"]}
         if args.live and len([r for r in rows if r.get("live_attempted")]) < args.max_live_requests:
             row["live_attempted"] = True
-            row.update(run_live(case, token))
+            row.update(run_live(case, token, investigate=not args.skip_investigation))
         else:
             row["outcome"] = "NOT_RUN"
         if analysis := failure_analysis(row):

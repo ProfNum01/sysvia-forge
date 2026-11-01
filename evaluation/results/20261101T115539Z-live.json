@@ -1,0 +1,282 @@
+{
+  "dataset_id": "synthetic-packing-existing-v1",
+  "mode": "LIVE_META",
+  "created_at": "2026-11-01T11:55:39.271271+00:00",
+  "cases_available": 1,
+  "live_inspection_attempts": 1,
+  "metrics": {
+    "sample_size": 1,
+    "provenance_counts": {
+      "SYNTHETIC": 1
+    },
+    "false_verification_count": 0,
+    "false_verification_rate_percent": 0.0,
+    "human_review_count": 1,
+    "human_review_rate_percent": 100.0,
+    "unauthorized_execution_count": 0,
+    "incorrect_verification_count": 0,
+    "successful_verification_count": 0,
+    "unresolved_discrepancy_count": 1,
+    "stale_order_rejection_count": null,
+    "shipping_safety_violation_count": 0,
+    "agent_sample_size": 0,
+    "valid_action_proposal_rate_percent": null,
+    "tool_execution_success_rate_percent": null,
+    "incorrect_action_proposal_count": 0,
+    "average_investigation_duration_seconds": null,
+    "product_identification_accuracy_percent": null,
+    "product_identification_accuracy_note": "No independent region-level SKU annotations; not measured.",
+    "quantity_agreement_sample_size": 0,
+    "quantity_agreement_percent": null,
+    "discrepancy_detection_sample_size": 0,
+    "uncertain_cases_excluded_from_detection_metrics": 1,
+    "discrepancy_detection_precision_percent": null,
+    "discrepancy_detection_recall_percent": null
+  },
+  "cases": [
+    {
+      "scenario_id": "packing-extra-before",
+      "provenance": "SYNTHETIC",
+      "evidence": "evaluation/datasets/synthetic-packing/03_extra_product_before.png",
+      "evidence_sha256": "daf87eca29ed2fe2a68227a32030ded5a3d7f9e505cd5c342026fe5dfa4ce369",
+      "ground_truth_quantities": {
+        "packing-blue-box": 2,
+        "packing-red-can": 1,
+        "packing-yellow-pouch": 1,
+        "packing-green-cube": 1
+      },
+      "ground_truth_limitations": "Visible shape and color only; no readable SKU labels.",
+      "expected_discrepancy": [
+        "EXTRA_OR_REVIEW"
+      ],
+      "expected_agent_behavior": "REQUEST_REVIEW_OR_NEW_IMAGE",
+      "expected_verification_policy": "NEEDS_REVIEW",
+      "live_attempted": true,
+      "inspection_id": "09a6d985-e2b8-4300-bbda-fd4e2bea4ffa",
+      "inspection_status": "NEEDS_REVIEW",
+      "actual_discrepancies": [
+        "GEOMETRY_UNCONFIRMED",
+        "NOT_OBSERVED",
+        "UNIDENTIFIED"
+      ],
+      "comparison": [
+        {
+          "product_id": "packing-blue-box",
+          "sku": "PACK-BLUE-BOX",
+          "name": "Blue rectangular box",
+          "required_quantity": 2,
+          "observed_quantity": null,
+          "difference": null,
+          "status": "NOT_OBSERVED",
+          "evidence_region_ids": []
+        },
+        {
+          "product_id": "packing-red-can",
+          "sku": "PACK-RED-CAN",
+          "name": "Red cylindrical can",
+          "required_quantity": 1,
+          "observed_quantity": null,
+          "difference": null,
+          "status": "NOT_OBSERVED",
+          "evidence_region_ids": []
+        },
+        {
+          "product_id": "packing-yellow-pouch",
+          "sku": "PACK-YELLOW-POUCH",
+          "name": "Yellow pouch",
+          "required_quantity": 1,
+          "observed_quantity": null,
+          "difference": null,
+          "status": "NOT_OBSERVED",
+          "evidence_region_ids": []
+        }
+      ],
+      "observations": [
+        {
+          "id": "8f036558-8e89-484f-8c8c-9771db7cff92",
+          "product_id": null,
+          "quantity": null,
+          "label_text": "no readable SKU",
+          "evidence": "blue rectangular box on left side of table, no legible SKU text visible",
+          "identity_certain": false,
+          "count_certain": false,
+          "sku": null,
+          "identification_status": "UNIDENTIFIED",
+          "evidence_region_ids": []
+        },
+        {
+          "id": "15fb2871-3e58-48ce-9119-7b2da721de6b",
+          "product_id": null,
+          "quantity": null,
+          "label_text": "no readable SKU",
+          "evidence": "blue rectangular box in upper middle, no legible SKU text visible",
+          "identity_certain": false,
+          "count_certain": false,
+          "sku": null,
+          "identification_status": "UNIDENTIFIED",
+          "evidence_region_ids": []
+        },
+        {
+          "id": "2c6d34f4-788c-426e-b0c8-ded261fe4f3b",
+          "product_id": null,
+          "quantity": null,
+          "label_text": "no readable SKU",
+          "evidence": "red cylindrical can near center, no legible SKU text visible",
+          "identity_certain": false,
+          "count_certain": false,
+          "sku": null,
+          "identification_status": "UNIDENTIFIED",
+          "evidence_region_ids": []
+        },
+        {
+          "id": "01d90689-9c1c-40c5-bd72-0a927a2c3733",
+          "product_id": null,
+          "quantity": null,
+          "label_text": "no readable SKU",
+          "evidence": "yellow pouch on right side, no legible SKU text visible",
+          "identity_certain": false,
+          "count_certain": false,
+          "sku": null,
+          "identification_status": "UNIDENTIFIED",
+          "evidence_region_ids": []
+        },
+        {
+          "id": "adafac25-e70a-47a4-879d-c7dd8925ed1d",
+          "product_id": null,
+          "quantity": null,
+          "label_text": "no readable SKU",
+          "evidence": "green cube box on lower right, no legible SKU text visible",
+          "identity_certain": false,
+          "count_certain": false,
+          "sku": null,
+          "identification_status": "UNIDENTIFIED",
+          "evidence_region_ids": []
+        }
+      ],
+      "regions": [],
+      "segmentation_box_count": 0,
+      "shipping_status": "HELD",
+      "models": {
+        "image_quality": {
+          "quality_status": "ACCEPTABLE",
+          "issues": [],
+          "retake_instructions": [],
+          "measurements": {
+            "width": 1920,
+            "height": 1280,
+            "mean_luminance": 159.2,
+            "dark_fraction": 0.005,
+            "clipped_fraction": 0.0,
+            "edge_variance": 416.1
+          }
+        },
+        "image_validation_ms": 373,
+        "image_quality_ms": 67,
+        "muse_model": "muse-spark-1.3",
+        "muse_latency_ms": 27409,
+        "muse_usage": {
+          "prompt_tokens": 4024,
+          "completion_tokens": 4208,
+          "total_tokens": 8232
+        },
+        "muse_http_status": 200,
+        "sam_model": "sam-3.1",
+        "sam_http_status": 200,
+        "muse_observations": [
+          {
+            "product_id": null,
+            "quantity": 1,
+            "label_text": "no readable SKU",
+            "evidence": "blue rectangular box on left side of table, no legible SKU text visible",
+            "identity_certain": false,
+            "count_certain": true,
+            "source_box": {
+              "left": 54.0,
+              "top": 318.0,
+              "right": 494.0,
+              "bottom": 624.0
+            },
+            "evidence_region_ids": []
+          },
+          {
+            "product_id": null,
+            "quantity": 1,
+            "label_text": "no readable SKU",
+            "evidence": "blue rectangular box in upper middle, no legible SKU text visible",
+            "identity_certain": false,
+            "count_certain": true,
+            "source_box": {
+              "left": 594.0,
+              "top": 312.0,
+              "right": 998.0,
+              "bottom": 616.0
+            },
+            "evidence_region_ids": []
+          },
+          {
+            "product_id": null,
+            "quantity": 1,
+            "label_text": "no readable SKU",
+            "evidence": "red cylindrical can near center, no legible SKU text visible",
+            "identity_certain": false,
+            "count_certain": true,
+            "source_box": {
+              "left": 711.0,
+              "top": 732.0,
+              "right": 904.0,
+              "bottom": 914.0
+            },
+            "evidence_region_ids": []
+          },
+          {
+            "product_id": null,
+            "quantity": 1,
+            "label_text": "no readable SKU",
+            "evidence": "yellow pouch on right side, no legible SKU text visible",
+            "identity_certain": false,
+            "count_certain": true,
+            "source_box": {
+              "left": 1271.0,
+              "top": 395.0,
+              "right": 1546.0,
+              "bottom": 774.0
+            },
+            "evidence_region_ids": []
+          },
+          {
+            "product_id": null,
+            "quantity": 1,
+            "label_text": "no readable SKU",
+            "evidence": "green cube box on lower right, no legible SKU text visible",
+            "identity_certain": false,
+            "count_certain": true,
+            "source_box": {
+              "left": 1288.0,
+              "top": 884.0,
+              "right": 1523.0,
+              "bottom": 1097.0
+            },
+            "evidence_region_ids": []
+          }
+        ],
+        "sam_latency_ms": 4976,
+        "total_latency_ms": 33027,
+        "sam_requests": 1,
+        "analysis_version": 2
+      },
+      "analysis_http_status": 200,
+      "outcome": "NEEDS_HUMAN_REVIEW",
+      "failed_safely": true,
+      "failure_analysis": {
+        "evidence": "evaluation/datasets/synthetic-packing/03_extra_product_before.png",
+        "expected_outcome": "NEEDS_REVIEW",
+        "actual_outcome": "NEEDS_HUMAN_REVIEW",
+        "failure_category": "PERCEPTION_UNCERTAIN",
+        "service": "muse-spark-1.3 / sam-3.1",
+        "stage": "perception",
+        "failed_safely": true,
+        "suggested_change": "Capture clearer evidence and inspect the unmatched regions."
+      }
+    }
+  ]
+}

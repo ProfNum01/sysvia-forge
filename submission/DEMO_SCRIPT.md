@@ -1,6 +1,6 @@
 # ProofSight demo script (maximum 180 seconds)
 
-**Evidence basis:** Two live Meta inspections of existing SYNTHETIC packing scenes on November 1, 2026. Both returned `NEEDS_REVIEW`. The after images have not received live inference. A separate existing synthetic fixture has a persisted before/after workflow; it is not physical validation.
+**Evidence basis:** Three live Meta inspections of existing SYNTHETIC packing scenes on November 1, 2026. All returned `NEEDS_REVIEW`. The latest extra-product inspection localized five objects with Muse but obtained no SAM boxes from the tested generic prompt. The after images have not received live inference. A separate existing synthetic fixture has a persisted before/after workflow; it is not physical validation.
 
 | Time | Screen | Voiceover |
 |---|---|---|
@@ -10,6 +10,6 @@
 | 01:20–01:55 | AI Operations, tool timeline | “The agent used five bounded read tools to inspect the order, inventory, and evidence. Its recommendation is recorded. Server policy permits only validated proposals, with human approval for consequential actions.” |
 | 01:55–02:25 | Action state and held shipping | “The order remains held. An operator may review a proposed action; completing a physical task never counts as visual verification.” |
 | 02:25–02:45 | Show supplied after image, clearly labeled uninspected | “The supplied after photo depicts the intended synthetic correction, but it has not been live re-inspected. A new photo and a separate model result are required to verify any correction.” |
-| 02:45–03:00 | Benchmark summary | “Across two live synthetic cases, inspection latency was 19.253 and 18.743 seconds. Both were escalated safely; no false verification or shipping safety violation was observed in this small sample.” |
+| 02:45–03:00 | Benchmark summary | “All three live synthetic inspections required review. The newest took 33.027 seconds. No false verification or shipping safety violation was observed in this small sample.” |
 
 **Recording rule:** Show actual persisted results. Do not imply the after images, physical correction, or an approval flow were live validated in this sprint. Do not show credentials.

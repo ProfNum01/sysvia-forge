@@ -104,6 +104,8 @@ class InspectionWorkflowTests(unittest.TestCase):
             duplicate = self.client.post(f"/api/inspections/{inspection['id']}/analyze", headers=self.auth)
         self.assertEqual(first.status_code, 200)
         self.assertIn("image_quality", first.json()["provider_metadata"])
+        self.assertEqual(first.json()["provider_metadata"]["muse_observations"],
+                         grounded_visual_result()["muse"]["observations"])
         self.assertEqual(duplicate.status_code, 409)
         self.assertEqual(len(requests), 1)
         self.assertEqual({product["id"] for product in requests[0][1]},

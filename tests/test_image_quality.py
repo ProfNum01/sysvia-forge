@@ -1,6 +1,7 @@
 import io
 import unittest
-from PIL import Image, ImageFilter
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 from backend.app.services.image_quality import analyze_image_quality
 
@@ -12,6 +13,18 @@ def sample(image):
 
 
 class ImageQualityTests(unittest.TestCase):
+    def test_existing_scene_and_controlled_variations(self):
+        source = Path("evaluation/datasets/synthetic-packing/01_missing_product_before.png")
+        with Image.open(source) as opened:
+            image = opened.convert("RGB")
+        self.assertEqual(analyze_image_quality(sample(image))["quality_status"], "ACCEPTABLE")
+        self.assertEqual(analyze_image_quality(sample(ImageEnhance.Brightness(image).enhance(.8)))["quality_status"], "ACCEPTABLE")
+        self.assertIn("LOW_LIGHT", analyze_image_quality(sample(ImageEnhance.Brightness(image).enhance(.1)))["issues"])
+        self.assertIn("EXCESSIVE_BLUR", analyze_image_quality(sample(image.filter(ImageFilter.GaussianBlur(12))))["issues"])
+        obstructed = image.copy()
+        ImageDraw.Draw(obstructed).rectangle((600, 300, 1000, 650), fill=(90, 90, 90))
+        self.assertNotIn("LOW_RESOLUTION", analyze_image_quality(sample(obstructed))["issues"])
+
     def test_clear_photo_is_not_rejected(self):
         image = Image.new("RGB", (512, 512), "white")
         for x in range(100, 400):

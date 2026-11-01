@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Callable
 
@@ -28,9 +29,13 @@ def run_visual_models(image_path: str, products: list[dict], annotation_path: Pa
     catalog = {product["id"]: product for product in products}
     candidates = list(dict.fromkeys(row.get("product_id") for row in muse.get("observations", [])
                                    if row.get("product_id") in catalog))
-    budget_exceeded = len(candidates) > 4
-    requests = [(product_id, catalog[product_id]["description"]) for product_id in candidates[:4]]
-    if not requests and products:
+    try:
+        sam_budget = min(4, max(0, int(os.getenv("PROOFSIGHT_SAM_REQUEST_BUDGET", "4"))))
+    except ValueError:
+        sam_budget = 0
+    budget_exceeded = len(candidates) > sam_budget
+    requests = [(product_id, catalog[product_id]["description"]) for product_id in candidates[:sam_budget]]
+    if not requests and products and sam_budget > 0:
         requests = [(None, products[0]["description"])]
 
     async def segment():

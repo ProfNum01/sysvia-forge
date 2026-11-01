@@ -168,5 +168,15 @@ class ProviderBoundaryTests(unittest.TestCase):
         result = self.run_pipeline(rows, products=products)
         calls = [row for row in self.timeline if isinstance(row, tuple) and row[0] == "actual-sam-call"]
         self.assertEqual(len(calls), 4)
+
+    def test_configured_sam_budget_limits_paid_requests(self):
+        products = [{"id": f"p{i}", "sku": f"SKU-{i}", "name": f"Box {i}", "description": f"cardboard box {i}"} for i in range(4)]
+        rows = [{**observation(), "product_id": product["id"], "label_text": product["sku"]} for product in products]
+        with patch.dict("os.environ", {"PROOFSIGHT_SAM_REQUEST_BUDGET": "3"}):
+            result = self.run_pipeline(rows, products=products)
+        calls = [row for row in self.timeline if isinstance(row, tuple) and row[0] == "actual-sam-call"]
+        self.assertEqual(len(calls), 3)
+        self.assertFalse(result["sam"]["ok"])
+        self.assertEqual(result["sam"]["error"]["category"], "segmentation_budget_exceeded")
         self.assertFalse(result["sam"]["ok"])
         self.assertEqual(result["sam"]["error"]["category"], "segmentation_budget_exceeded")

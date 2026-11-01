@@ -14,7 +14,7 @@ GUIDANCE = {
 }
 
 
-def analyze_image_quality(content: bytes, *, min_side: int = 256) -> dict:
+def analyze_image_quality(content: bytes, *, min_side: int = 256, blur_variance_threshold: float = 50.0) -> dict:
     try:
         with Image.open(io.BytesIO(content)) as source:
             image = ImageOps.exif_transpose(source).convert("RGB")
@@ -41,7 +41,7 @@ def analyze_image_quality(content: bytes, *, min_side: int = 256) -> dict:
     # Local saturation can be a reflection or a white label; ask for review rather than rejecting.
     if 0.03 < clipped_fraction < 0.85 and mean > 210:
         issues.append("POTENTIAL_GLARE")
-    if edge_variance < 2 and 40 <= mean <= 245:
+    if edge_variance < blur_variance_threshold and 40 <= mean <= 245:
         issues.append("EXCESSIVE_BLUR")
     decisive = {"LOW_RESOLUTION", "LOW_LIGHT", "OVEREXPOSED"}
     status = ("RETAKE_RECOMMENDED" if decisive.intersection(issues) else

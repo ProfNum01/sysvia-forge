@@ -251,7 +251,8 @@ def create_inspection(request, db, order_id, image, rights_confirmed, parent=Non
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(content)
     quality_start = time.perf_counter()
-    quality = analyze_image_quality(content, min_side=request.app.state.settings.quality_min_side)
+    quality = analyze_image_quality(content, min_side=request.app.state.settings.quality_min_side,
+                                    blur_variance_threshold=request.app.state.settings.quality_blur_variance_threshold)
     quality_ms = round((time.perf_counter() - quality_start) * 1000)
     inspection = Inspection(order_id=order.id, requirements_revision=order.requirements_revision,
                             order_version=order.version,
@@ -516,6 +517,7 @@ def finish_analysis(db, inspection, result, sam, products, observations, regions
     inspection.segmentations = [{"boxes": sam.get("boxes", []), "masks": sam.get("masks", []),
                                 "note": "SAM geometry does not independently establish product SKU."}]
     inspection.provider_metadata = {**(inspection.provider_metadata or {}), "muse_model": result["muse"].get("model"),
+        "muse_observations": result["muse"].get("observations", [])[:200],
         "muse_usage": result["muse"].get("usage"), "muse_latency_ms": result["muse"].get("latency_ms"),
         "sam_latency_ms": sam.get("latency_ms"), "sam_model": "sam-3.1", "total_latency_ms": latency_ms,
         "muse_http_status": result["muse"].get("http_status"), "sam_http_status": sam.get("http_status"),
