@@ -1,0 +1,8 @@
+{
+  "reference": "TEN-ORDER-01",
+  "provenance": "SYNTHETIC",
+  "items": {
+    "BLUE-BOX": 1
+  },
+  "image": "evaluation/datasets/ten-orders/images/TEN-ORDER-01.png"
+}

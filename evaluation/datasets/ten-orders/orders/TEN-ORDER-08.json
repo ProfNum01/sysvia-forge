@@ -1,0 +1,8 @@
+{
+  "reference": "TEN-ORDER-08",
+  "provenance": "SYNTHETIC",
+  "items": {
+    "YELLOW-POUCH": 1
+  },
+  "image": "evaluation/datasets/ten-orders/images/TEN-ORDER-08.png"
+}

@@ -1,0 +1,205 @@
+{
+  "dataset_id": "ten-synthetic-whole-orders-v1",
+  "generator": "ProofSight deterministic Pillow drawings",
+  "provenance": "SYNTHETIC",
+  "catalog": {
+    "BLUE-BOX": "BLUE-BOX",
+    "RED-CAN": "RED-CAN",
+    "YELLOW-POUCH": "YELLOW-POUCH",
+    "GREEN-CUBE": "GREEN-CUBE"
+  },
+  "cases": [
+    {
+      "scenario_id": "single-blue",
+      "order_id": "TEN-ORDER-01",
+      "expected_quantities": {
+        "BLUE-BOX": 1
+      },
+      "ground_truth_quantities": {
+        "BLUE-BOX": 1
+      },
+      "evidence": "evaluation/datasets/ten-orders/images/TEN-ORDER-01.png",
+      "provenance": "SYNTHETIC",
+      "expected_discrepancy": [],
+      "expected_agent_behavior": "NO_INVESTIGATION",
+      "expected_verification_policy": "VERIFY_ONLY_WITH_SUFFICIENT_EVIDENCE",
+      "human_review_required": false
+    },
+    {
+      "scenario_id": "blue-red-pair",
+      "order_id": "TEN-ORDER-02",
+      "expected_quantities": {
+        "BLUE-BOX": 1,
+        "RED-CAN": 1
+      },
+      "ground_truth_quantities": {
+        "BLUE-BOX": 1,
+        "RED-CAN": 1
+      },
+      "evidence": "evaluation/datasets/ten-orders/images/TEN-ORDER-02.png",
+      "provenance": "SYNTHETIC",
+      "expected_discrepancy": [],
+      "expected_agent_behavior": "NO_INVESTIGATION",
+      "expected_verification_policy": "VERIFY_ONLY_WITH_SUFFICIENT_EVIDENCE",
+      "human_review_required": false
+    },
+    {
+      "scenario_id": "two-cans-one-pouch",
+      "order_id": "TEN-ORDER-03",
+      "expected_quantities": {
+        "RED-CAN": 2,
+        "YELLOW-POUCH": 1
+      },
+      "ground_truth_quantities": {
+        "RED-CAN": 2,
+        "YELLOW-POUCH": 1
+      },
+      "evidence": "evaluation/datasets/ten-orders/images/TEN-ORDER-03.png",
+      "provenance": "SYNTHETIC",
+      "expected_discrepancy": [],
+      "expected_agent_behavior": "NO_INVESTIGATION",
+      "expected_verification_policy": "VERIFY_ONLY_WITH_SUFFICIENT_EVIDENCE",
+      "human_review_required": false
+    },
+    {
+      "scenario_id": "four-sku-assortment",
+      "order_id": "TEN-ORDER-04",
+      "expected_quantities": {
+        "BLUE-BOX": 1,
+        "RED-CAN": 1,
+        "YELLOW-POUCH": 1,
+        "GREEN-CUBE": 1
+      },
+      "ground_truth_quantities": {
+        "BLUE-BOX": 1,
+        "RED-CAN": 1,
+        "YELLOW-POUCH": 1,
+        "GREEN-CUBE": 1
+      },
+      "evidence": "evaluation/datasets/ten-orders/images/TEN-ORDER-04.png",
+      "provenance": "SYNTHETIC",
+      "expected_discrepancy": [],
+      "expected_agent_behavior": "NO_INVESTIGATION",
+      "expected_verification_policy": "VERIFY_ONLY_WITH_SUFFICIENT_EVIDENCE",
+      "human_review_required": false
+    },
+    {
+      "scenario_id": "two-blue-two-green",
+      "order_id": "TEN-ORDER-05",
+      "expected_quantities": {
+        "BLUE-BOX": 2,
+        "GREEN-CUBE": 2
+      },
+      "ground_truth_quantities": {
+        "BLUE-BOX": 2,
+        "GREEN-CUBE": 2
+      },
+      "evidence": "evaluation/datasets/ten-orders/images/TEN-ORDER-05.png",
+      "provenance": "SYNTHETIC",
+      "expected_discrepancy": [],
+      "expected_agent_behavior": "NO_INVESTIGATION",
+      "expected_verification_policy": "VERIFY_ONLY_WITH_SUFFICIENT_EVIDENCE",
+      "human_review_required": false
+    },
+    {
+      "scenario_id": "mixed-five",
+      "order_id": "TEN-ORDER-06",
+      "expected_quantities": {
+        "BLUE-BOX": 2,
+        "RED-CAN": 1,
+        "YELLOW-POUCH": 1,
+        "GREEN-CUBE": 1
+      },
+      "ground_truth_quantities": {
+        "BLUE-BOX": 2,
+        "RED-CAN": 1,
+        "YELLOW-POUCH": 1,
+        "GREEN-CUBE": 1
+      },
+      "evidence": "evaluation/datasets/ten-orders/images/TEN-ORDER-06.png",
+      "provenance": "SYNTHETIC",
+      "expected_discrepancy": [],
+      "expected_agent_behavior": "NO_INVESTIGATION",
+      "expected_verification_policy": "VERIFY_ONLY_WITH_SUFFICIENT_EVIDENCE",
+      "human_review_required": false
+    },
+    {
+      "scenario_id": "missing-red-can",
+      "order_id": "TEN-ORDER-07",
+      "expected_quantities": {
+        "BLUE-BOX": 1,
+        "RED-CAN": 1
+      },
+      "ground_truth_quantities": {
+        "BLUE-BOX": 1
+      },
+      "evidence": "evaluation/datasets/ten-orders/images/TEN-ORDER-07.png",
+      "provenance": "SYNTHETIC",
+      "expected_discrepancy": [
+        "SHORTFALL_OR_REVIEW"
+      ],
+      "expected_agent_behavior": "INVESTIGATE_WITH_READ_TOOLS_AND_PROPOSE_REVIEW",
+      "expected_verification_policy": "BLOCK_UNTIL_NEW_EVIDENCE",
+      "human_review_required": true
+    },
+    {
+      "scenario_id": "extra-green-cube",
+      "order_id": "TEN-ORDER-08",
+      "expected_quantities": {
+        "YELLOW-POUCH": 1
+      },
+      "ground_truth_quantities": {
+        "YELLOW-POUCH": 1,
+        "GREEN-CUBE": 1
+      },
+      "evidence": "evaluation/datasets/ten-orders/images/TEN-ORDER-08.png",
+      "provenance": "SYNTHETIC",
+      "expected_discrepancy": [
+        "EXTRA_PRODUCT_OR_REVIEW"
+      ],
+      "expected_agent_behavior": "INVESTIGATE_WITH_READ_TOOLS_AND_PROPOSE_REVIEW",
+      "expected_verification_policy": "BLOCK_UNTIL_NEW_EVIDENCE",
+      "human_review_required": true
+    },
+    {
+      "scenario_id": "wrong-product-substitution",
+      "order_id": "TEN-ORDER-09",
+      "expected_quantities": {
+        "BLUE-BOX": 1,
+        "RED-CAN": 1
+      },
+      "ground_truth_quantities": {
+        "BLUE-BOX": 1,
+        "YELLOW-POUCH": 1
+      },
+      "evidence": "evaluation/datasets/ten-orders/images/TEN-ORDER-09.png",
+      "provenance": "SYNTHETIC",
+      "expected_discrepancy": [
+        "SUBSTITUTION_OR_REVIEW"
+      ],
+      "expected_agent_behavior": "INVESTIGATE_WITH_READ_TOOLS_AND_PROPOSE_REVIEW",
+      "expected_verification_policy": "BLOCK_UNTIL_NEW_EVIDENCE",
+      "human_review_required": true
+    },
+    {
+      "scenario_id": "wrong-blue-quantity",
+      "order_id": "TEN-ORDER-10",
+      "expected_quantities": {
+        "BLUE-BOX": 2,
+        "GREEN-CUBE": 1
+      },
+      "ground_truth_quantities": {
+        "BLUE-BOX": 1,
+        "GREEN-CUBE": 1
+      },
+      "evidence": "evaluation/datasets/ten-orders/images/TEN-ORDER-10.png",
+      "provenance": "SYNTHETIC",
+      "expected_discrepancy": [
+        "SHORTFALL_OR_REVIEW"
+      ],
+      "expected_agent_behavior": "INVESTIGATE_WITH_READ_TOOLS_AND_PROPOSE_REVIEW",
+      "expected_verification_policy": "BLOCK_UNTIL_NEW_EVIDENCE",
+      "human_review_required": true
+    }
+  ]
+}

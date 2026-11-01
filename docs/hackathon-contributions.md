@@ -231,3 +231,9 @@
 - Added offline mocked-transport scenarios for visual uncertainty, a supported shortfall, and an existing task. They exercise distinct recommendations through the real SQLite-backed tool and policy services; they are not live Meta results.
 - No paid request was made. The local audit has 89 previously attempted model requests (45 agent, 15 Muse analysis, 29 SAM), exceeding the original cumulative authorization of 30. Consequently live adaptive divergence and new Meta inference remain unvalidated.
 
+
+# 2026-11-01 — Ten synthetic order scenes
+
+- Generated ten original deterministic whole-order PNG illustrations and ten matching order JSON manifests using the four fictional SKU labels. Six depict correct orders and four depict distinct conflicts.
+- Added a benchmark-format index, generator script, dataset provenance notes, and an offline completeness test. No application order, inspection, verified state, or Meta inference was created.
+
