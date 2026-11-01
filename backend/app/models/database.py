@@ -152,7 +152,7 @@ class Discrepancy(Base):
 
 class CorrectiveAction(Base):
     __tablename__ = "corrective_actions"
-    __table_args__ = (CheckConstraint("type IN ('HOLD_ORDER', 'HOLD_SHIPMENT', 'CREATE_PICKING_TASK', 'CREATE_REMOVAL_TASK', 'REQUEST_REINSPECTION', 'ESCALATE_TO_HUMAN')"),)
+    __table_args__ = (CheckConstraint("type IN ('HOLD_ORDER', 'HOLD_SHIPMENT', 'CREATE_PICKING_TASK', 'CREATE_REMOVAL_TASK', 'REQUEST_REINSPECTION', 'ESCALATE_TO_HUMAN', 'REQUEST_HUMAN_REVIEW', 'PROPOSE_CORRECTIVE_PICK', 'ESCALATE_TO_SUPERVISOR')"),)
     id: Mapped[str] = mapped_column(String, primary_key=True, default=identifier)
     inspection_id: Mapped[str] = mapped_column(ForeignKey("inspections.id"))
     product_id: Mapped[str | None] = mapped_column(ForeignKey("products.id"), nullable=True)
@@ -168,6 +168,38 @@ class CorrectiveAction(Base):
     error_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     execution_key: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
     execution_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, default=timestamp)
+    operational_task: Mapped[OperationalTask | None] = relationship(uselist=False, lazy="selectin")
+
+
+class OperationalTask(Base):
+    __tablename__ = "operational_tasks"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=identifier)
+    action_id: Mapped[str] = mapped_column(ForeignKey("corrective_actions.id"), unique=True)
+    order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"))
+    inspection_id: Mapped[str] = mapped_column(ForeignKey("inspections.id"))
+    type: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="PENDING_APPROVAL")
+    evidence_references: Mapped[list] = mapped_column(JSON, default=list)
+    ai_recommendation: Mapped[str] = mapped_column(Text)
+    instructions: Mapped[str] = mapped_column(Text)
+    assigned_operator: Mapped[str | None] = mapped_column(String, nullable=True)
+    approval_required: Mapped[bool] = mapped_column(Boolean, default=True)
+    priority: Mapped[str] = mapped_column(String, default="NORMAL")
+    evidence_inspection_id: Mapped[str | None] = mapped_column(ForeignKey("inspections.id"), nullable=True)
+    acknowledged_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    completed_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, default=timestamp)
+    updated_at: Mapped[str] = mapped_column(String, default=timestamp)
+
+
+class TaskTransition(Base):
+    __tablename__ = "task_transitions"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=identifier)
+    task_id: Mapped[str] = mapped_column(ForeignKey("operational_tasks.id"))
+    operation: Mapped[str] = mapped_column(String)
+    idempotency_key: Mapped[str] = mapped_column(String, unique=True)
+    actor: Mapped[str] = mapped_column(String)
     created_at: Mapped[str] = mapped_column(String, default=timestamp)
 
 

@@ -18,6 +18,7 @@ from backend.app.core.middleware import BodyLimitMiddleware
 from backend.app.core.migrations import upgrade_local_schema
 from backend.app.models.database import Base, Inspection, audit, connect_database
 from backend.app.services.catalog import ensure_catalog_references
+from backend.app.services.action_policy import backfill_existing_reinspection_tasks
 
 
 def create_app(settings: Settings | None = None):
@@ -32,6 +33,7 @@ def create_app(settings: Settings | None = None):
         upgrade_local_schema(engine)
         ensure_catalog_references(settings.data_dir)
         with sessions() as db:
+            backfill_existing_reinspection_tasks(db)
             for row in db.scalars(select(Inspection)):
                 # Evidence is identified by its immutable photo UUID, not a previous
                 # Windows/WSL/container absolute path. The data volume is portable.

@@ -6,6 +6,9 @@ const supportedTypes = new Set([
   "CREATE_REMOVAL_TASK",
   "REQUEST_REINSPECTION",
   "ESCALATE_TO_HUMAN",
+  "REQUEST_HUMAN_REVIEW",
+  "PROPOSE_CORRECTIVE_PICK",
+  "ESCALATE_TO_SUPERVISOR",
 ]);
 export function actionControls(action: {
   type: string;
@@ -33,12 +36,15 @@ export function actionImpact(type: string): string {
     case "HOLD_SHIPMENT":
       return "Prevents this order from advancing to shipping through ProofSight.";
     case "CREATE_PICKING_TASK":
+    case "PROPOSE_CORRECTIVE_PICK":
       return "Creates a local picking task. Inventory is not deducted, and physical completion is not assumed.";
     case "CREATE_REMOVAL_TASK":
       return "Creates a local removal task for supported excess units. Inventory is not deducted, and physical completion is not assumed.";
     case "REQUEST_REINSPECTION":
       return "Requires new visual evidence. The request does not verify the order.";
     case "ESCALATE_TO_HUMAN":
+    case "REQUEST_HUMAN_REVIEW":
+    case "ESCALATE_TO_SUPERVISOR":
       return "Routes unresolved evidence to human review. The order remains unverified.";
     default:
       return "This action type is not supported by the current interface. Server policy remains authoritative.";

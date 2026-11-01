@@ -16,7 +16,7 @@ from sqlalchemy import select, func
 
 from backend.app.main import create_app
 from backend.app.core.config import Settings
-from backend.app.models.database import Approval, CorrectiveAction, Inspection, Inventory, AuditEvent, PickingTask
+from backend.app.models.database import Approval, CorrectiveAction, Inspection, Inventory, AuditEvent, PickingTask, OperationalTask
 from backend.app.services.seed import seed_demo
 from model_fixtures import grounded_visual_result, grounded_wrong_product_result
 
@@ -65,6 +65,225 @@ class ActionEngineTests(unittest.TestCase):
     def investigate(self, inspection, proposal):
         with patch("backend.app.api.routes.investigate_with_read_tools", return_value=proposal):
             return self.client.post(f"/api/inspections/{inspection['id']}/investigate", headers=self.auth)
+
+    def test_reinspection_recommendation_creates_auditable_pending_task(self):
+        inspection = self.inspection(certain=False)
+        self.assertEqual(inspection["status"], "NEEDS_REVIEW")
+        proposal = self.proposal(inspection, action_type="REQUEST_REINSPECTION", product_id=None, quantity=None)
+        payload = proposal.model_dump()
+        payload["decision"] = "HUMAN_REVIEW_REQUIRED"
+        proposal = SimpleNamespace(model_dump=lambda: payload)
+        response = self.investigate(inspection, proposal)
+        self.assertEqual(response.status_code, 200)
+        action = next(row for row in response.json()["actions"] if row["type"] == "REQUEST_REINSPECTION")
+        self.assertEqual(action["operational_task"]["status"], "PENDING_APPROVAL")
+        self.assertIn(inspection["photo_id"], action["operational_task"]["instructions"])
+        with self.app.state.sessions() as db:
+            task = db.scalar(select(OperationalTask).where(OperationalTask.action_id == action["id"]))
+            self.assertIsNotNone(task)
+            self.assertEqual(task.order_id, inspection["order_id"])
+            self.assertIsNotNone(db.scalar(select(AuditEvent).where(AuditEvent.entity_id == task.id)))
+        self.assertEqual(self.client.post(f"/api/actions/{action['id']}/execute",
+            json={"idempotency_key": "unapproved-reinspect"}).status_code, 409)
+
+    def test_operational_task_api_requires_supervisor_and_tracks_execution(self):
+        inspection = self.inspection(certain=False)
+        payload = self.proposal(inspection, "REQUEST_REINSPECTION", None, None).model_dump()
+        payload["decision"] = "HUMAN_REVIEW_REQUIRED"
+        response = self.investigate(inspection, SimpleNamespace(model_dump=lambda: payload))
+        self.assertEqual(response.status_code, 200)
+        action = next(row for row in response.json()["actions"] if row["type"] == "REQUEST_REINSPECTION")
+        self.assertEqual(self.client.get("/api/operational-tasks", headers={"Authorization": "Bearer wrong"}).status_code, 403)
+        tasks = self.client.get("/api/operational-tasks").json()
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["action_id"], action["id"])
+        self.assertEqual(self.client.post(f"/api/actions/{action['id']}/approve",
+            json={"idempotency_key": "task-approval-123"}).status_code, 200)
+        self.assertEqual(self.client.post(f"/api/actions/{action['id']}/execute",
+            json={"idempotency_key": "task-execution-123"}).status_code, 200)
+        self.assertEqual(self.client.get("/api/operational-tasks").json()[0]["status"], "OPEN")
+        self.assertEqual(self.client.get("/api/orders/order-1001").json()["shipping_status"], "HELD")
+
+    def test_reinspection_rejects_unlinked_photo_evidence(self):
+        inspection = self.inspection(certain=False)
+        payload = self.proposal(inspection, "REQUEST_REINSPECTION", None, None).model_dump()
+        payload["decision"] = "HUMAN_REVIEW_REQUIRED"
+        payload["recommended_actions"][0]["evidence_references"] = [f"inspection:{inspection['id']}"]
+        self.assertEqual(self.investigate(inspection, SimpleNamespace(model_dump=lambda: payload)).status_code, 422)
+        with self.app.state.sessions() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(OperationalTask)), 0)
+
+    def test_requested_action_names_use_existing_approval_gate(self):
+        inspection = self.inspection()
+        payload = self.proposal(inspection, "PROPOSE_CORRECTIVE_PICK").model_dump()
+        response = self.investigate(inspection, SimpleNamespace(model_dump=lambda: payload))
+        self.assertEqual(response.status_code, 200)
+        action = next(row for row in response.json()["actions"] if row["type"] == "PROPOSE_CORRECTIVE_PICK")
+        self.assertEqual(action["operational_task"]["status"], "PENDING_APPROVAL")
+        self.assertEqual(self.client.post(f"/api/actions/{action['id']}/execute",
+            json={"idempotency_key": "pick-before-approval"}).status_code, 409)
+        self.assertEqual(self.client.post(f"/api/actions/{action['id']}/approve",
+            json={"idempotency_key": "pick-approval"}).status_code, 200)
+        self.assertEqual(self.client.post(f"/api/actions/{action['id']}/execute",
+            json={"idempotency_key": "pick-execution"}).status_code, 200)
+        with self.app.state.sessions() as db:
+            self.assertIsNotNone(db.scalar(select(PickingTask).where(PickingTask.action_id == action["id"])))
+            self.assertEqual(db.scalar(select(Inventory).where(Inventory.product_id == "product-red")).quantity_available, 20)
+
+    def test_operator_reinspection_task_lifecycle_preserves_shipping_hold(self):
+        inspection = self.inspection(certain=False)
+        payload = self.proposal(inspection, "REQUEST_REINSPECTION", None, None).model_dump()
+        payload["decision"] = "HUMAN_REVIEW_REQUIRED"
+        response = self.investigate(inspection, SimpleNamespace(model_dump=lambda: payload))
+        action = next(row for row in response.json()["actions"] if row["type"] == "REQUEST_REINSPECTION")
+        task_id = action["operational_task"]["id"]
+        path = f"/api/operational-tasks/{task_id}"
+        self.assertEqual(self.client.post(path + "/assign", json={"assignee": "someone-else", "idempotency_key": "assign-wrong"}).status_code, 422)
+        self.assertEqual(self.client.post(path + "/assign", json={"assignee": "local-supervisor", "idempotency_key": "assign-early"}).status_code, 409)
+        self.assertEqual(self.client.post(f"/api/actions/{action['id']}/approve", json={"idempotency_key": "approval-operator"}).status_code, 200)
+        self.assertEqual(self.client.post(f"/api/actions/{action['id']}/execute", json={"idempotency_key": "execute-operator"}).status_code, 200)
+        for operation, status in (("assign", "ASSIGNED"), ("acknowledge", "ACKNOWLEDGED"),
+                                  ("start", "IN_PROGRESS"), ("request-evidence", "EVIDENCE_REQUIRED")):
+            body = {"idempotency_key": f"task-{operation}-123"}
+            if operation == "assign":
+                body["assignee"] = "local-supervisor"
+            changed = self.client.post(path + "/" + operation, json=body)
+            self.assertEqual(changed.status_code, 200, changed.text)
+            self.assertEqual(changed.json()["status"], status)
+            self.assertEqual(self.client.post(path + "/" + operation, json=body).status_code, 200)
+        output = io.BytesIO()
+        Image.new("RGB", (512, 512), (110, 120, 130)).save(output, "PNG")
+        submitted = self.client.post(path + "/evidence", headers={"Idempotency-Key": "task-evidence-123"},
+            data={"rights_confirmed": "true", "evidence_provenance": "SYNTHETIC"}, files={"image": ("new.png", output.getvalue(), "image/png")})
+        self.assertEqual(submitted.status_code, 201, submitted.text)
+        self.assertEqual(submitted.json()["status"], "EVIDENCE_SUBMITTED")
+        self.assertEqual(self.client.post(path + "/evidence", headers={"Idempotency-Key": "task-evidence-123"},
+            data={"rights_confirmed": "true", "evidence_provenance": "SYNTHETIC"}, files={"image": ("new.png", output.getvalue(), "image/png")}).status_code, 200)
+        different = io.BytesIO()
+        Image.new("RGB", (512, 512), (130, 110, 120)).save(different, "PNG")
+        self.assertEqual(self.client.post(path + "/evidence", headers={"Idempotency-Key": "task-evidence-123"},
+            data={"rights_confirmed": "true", "evidence_provenance": "SYNTHETIC"}, files={"image": ("different.png", different.getvalue(), "image/png")}).status_code, 409)
+        self.assertEqual(self.client.get(path).json()["status"], "EVIDENCE_SUBMITTED")
+        self.assertEqual(self.client.get("/api/orders/order-1001").json()["shipping_status"], "HELD")
+        with patch("backend.app.api.routes.run_visual_models", return_value=grounded_visual_result()):
+            analyzed = self.client.post(f"/api/inspections/{submitted.json()['evidence_inspection_id']}/analyze")
+        self.assertEqual(analyzed.status_code, 200)
+        self.assertEqual(self.client.get(path).json()["status"], "COMPLETED")
+        with self.app.state.sessions() as db:
+            self.assertGreaterEqual(db.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.entity_id == task_id)), 7)
+
+    def test_task_escalation_and_impersonation_are_rejected(self):
+        inspection = self.inspection(certain=False)
+        payload = self.proposal(inspection, "REQUEST_REINSPECTION", None, None).model_dump()
+        payload["decision"] = "HUMAN_REVIEW_REQUIRED"
+        result = self.investigate(inspection, SimpleNamespace(model_dump=lambda: payload)).json()
+        action = next(row for row in result["actions"] if row["type"] == "REQUEST_REINSPECTION")
+        task_id = action["operational_task"]["id"]
+        path = f"/api/operational-tasks/{task_id}"
+        self.assertEqual(self.client.get(path, headers={"Authorization": "Bearer invalid"}).status_code, 403)
+        self.assertEqual(self.client.get(path + "/timeline", headers={"Authorization": "Bearer invalid"}).status_code, 403)
+        self.client.post(f"/api/actions/{action['id']}/approve", json={"idempotency_key": "escalate-approve"})
+        self.client.post(f"/api/actions/{action['id']}/execute", json={"idempotency_key": "escalate-execute"})
+        forged = self.client.post(path + "/assign", json={"idempotency_key": "forged-user-1", "assignee": "employee-7"})
+        self.assertEqual(forged.status_code, 422)
+        self.assertEqual(self.client.post(path + "/assign", json={"idempotency_key": "valid-user-1", "assignee": "local-supervisor"}).status_code, 200)
+        self.assertEqual(self.client.post(path + "/escalate", json={"idempotency_key": "missing-reason"}).status_code, 422)
+        escalated = self.client.post(path + "/escalate", json={"idempotency_key": "escalate-task-1", "reason": "Cannot obtain a clear new photo."})
+        self.assertEqual(escalated.status_code, 200)
+        self.assertEqual(escalated.json()["status"], "ESCALATED")
+        self.assertEqual(self.client.post(path + "/start", json={"idempotency_key": "invalid-start"}).status_code, 409)
+        self.assertEqual(self.client.get("/api/orders/order-1001").json()["shipping_status"], "HELD")
+        self.assertIn("OPERATOR_TASK_ESCALATE", [row["event_type"] for row in self.client.get(path + "/timeline").json()])
+
+    def test_task_evidence_rejects_quality_provenance_and_cross_order_reuse(self):
+        inspection = self.inspection(certain=False)
+        payload = self.proposal(inspection, "REQUEST_REINSPECTION", None, None).model_dump()
+        payload["decision"] = "HUMAN_REVIEW_REQUIRED"
+        result = self.investigate(inspection, SimpleNamespace(model_dump=lambda: payload)).json()
+        action = next(row for row in result["actions"] if row["type"] == "REQUEST_REINSPECTION")
+        path = f"/api/operational-tasks/{action['operational_task']['id']}"
+        self.client.post(f"/api/actions/{action['id']}/approve", json={"idempotency_key": "evidence-approval"})
+        self.client.post(f"/api/actions/{action['id']}/execute", json={"idempotency_key": "evidence-execution"})
+        self.client.post(path + "/assign", json={"assignee": "local-supervisor", "idempotency_key": "evidence-assign"})
+        self.client.post(path + "/acknowledge", json={"idempotency_key": "evidence-ack"})
+        self.client.post(path + "/start", json={"idempotency_key": "evidence-start"})
+        self.client.post(path + "/request-evidence", json={"idempotency_key": "evidence-request"})
+        def png(size, color):
+            output = io.BytesIO()
+            Image.new("RGB", size, color).save(output, "PNG")
+            return output.getvalue()
+        def submit(key, content, provenance="SYNTHETIC", authorization=None):
+            return self.client.post(path + "/evidence", headers={"Idempotency-Key": key,
+                **({"Authorization": authorization} if authorization else {})},
+                data={"rights_confirmed": "true", "evidence_provenance": provenance},
+                files={"image": ("evidence.png", content, "image/png")})
+        self.assertEqual(submit("bad-provenance-1", png((512, 512), "gray"), "PHYSICAL_CAPTURE").status_code, 422)
+        self.assertEqual(submit("bad-quality-123", png((32, 32), "gray")).status_code, 422)
+        self.assertEqual(submit("unauthorized-1", png((512, 512), "gray"), authorization="Bearer invalid").status_code, 403)
+        registered_other = Path("evaluation/datasets/synthetic-packing/02_missing_product_after.png").read_bytes()
+        self.assertEqual(submit("foreign-fixture-1", registered_other).status_code, 409)
+        other = self.client.post("/api/inspections", data={"order_id": "order-1002", "rights_confirmed": "true"},
+            files={"image": ("other.png", png((512, 512), "gray"), "image/png")})
+        self.assertEqual(other.status_code, 201)
+        self.assertEqual(submit("cross-order-123", png((512, 512), "gray")).status_code, 409)
+        self.assertEqual(self.client.get(path).json()["status"], "EVIDENCE_REQUIRED")
+
+    def test_cumulative_meta_budget_blocks_reinspection_before_provider_call(self):
+        inspection = self.inspection(certain=False)
+        with self.app.state.sessions() as db:
+            db.add_all([AuditEvent(event_type="MUSE_ANALYSIS_STARTED", entity_id=inspection["id"],
+                                   actor="meta-provider", details={}) for _ in range(30)])
+            db.commit()
+        new_image = io.BytesIO()
+        Image.new("RGB", (32, 32), "green").save(new_image, "PNG")
+        replacement = self.client.post(f"/api/inspections/{inspection['id']}/reinspect",
+            data={"rights_confirmed": "true"}, files={"image": ("new.png", new_image.getvalue(), "image/png")})
+        self.assertEqual(replacement.status_code, 201)
+        with patch("backend.app.api.routes.run_visual_models") as provider:
+            response = self.client.post(f"/api/inspections/{replacement.json()['id']}/analyze")
+        self.assertEqual(response.status_code, 409)
+        provider.assert_not_called()
+        self.assertEqual(self.client.get("/api/integrations/meta/budget").json()["remaining_requests"], 0)
+
+    def ready_reinspection_task(self):
+        inspection = self.inspection(certain=False)
+        payload = self.proposal(inspection, "REQUEST_REINSPECTION", None, None).model_dump()
+        payload["decision"] = "HUMAN_REVIEW_REQUIRED"
+        result = self.investigate(inspection, SimpleNamespace(model_dump=lambda: payload)).json()
+        action = next(row for row in result["actions"] if row["type"] == "REQUEST_REINSPECTION")
+        path = f"/api/operational-tasks/{action['operational_task']['id']}"
+        self.client.post(f"/api/actions/{action['id']}/approve", json={"idempotency_key": "ready-approval"})
+        self.client.post(f"/api/actions/{action['id']}/execute", json={"idempotency_key": "ready-execution"})
+        for operation in ("assign", "acknowledge", "start", "request-evidence"):
+            self.client.post(path + "/" + operation, json={"idempotency_key": f"ready-{operation}-123",
+                **({"assignee": "local-supervisor"} if operation == "assign" else {})})
+        output = io.BytesIO()
+        Image.new("RGB", (512, 512), (120, 130, 110)).save(output, "PNG")
+        submitted = self.client.post(path + "/evidence", headers={"Idempotency-Key": "ready-evidence-123"},
+            data={"rights_confirmed": "true", "evidence_provenance": "SYNTHETIC"},
+            files={"image": ("new.png", output.getvalue(), "image/png")})
+        self.assertEqual(submitted.status_code, 201)
+        return path, submitted.json()["evidence_inspection_id"]
+
+    def test_reinspection_model_failure_keeps_task_and_shipping_held(self):
+        path, inspection_id = self.ready_reinspection_task()
+        with patch("backend.app.api.routes.run_visual_models", side_effect=RuntimeError("provider failure")):
+            response = self.client.post(f"/api/inspections/{inspection_id}/analyze")
+        self.assertEqual(response.status_code, 502)
+        saved = self.client.get(f"/api/inspections/{inspection_id}").json()
+        self.assertEqual(saved["status"], "PROVIDER_ERROR")
+        self.assertEqual(saved["observations"], [])
+        self.assertEqual(self.client.get(path).json()["status"], "EVIDENCE_SUBMITTED")
+        self.assertEqual(self.client.get("/api/orders/order-1001").json()["shipping_status"], "HELD")
+
+    def test_reinspection_persistent_uncertainty_completes_human_step_only(self):
+        path, inspection_id = self.ready_reinspection_task()
+        with patch("backend.app.api.routes.run_visual_models", return_value=grounded_visual_result(1, certain=False)):
+            response = self.client.post(f"/api/inspections/{inspection_id}/analyze")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "NEEDS_REVIEW")
+        self.assertEqual(self.client.get(path).json()["status"], "COMPLETED")
+        self.assertEqual(self.client.get("/api/orders/order-1001").json()["shipping_status"], "HELD")
 
     def test_structured_proposal_is_persisted_and_cannot_run_without_approval(self):
         inspection = self.inspection()

@@ -33,6 +33,12 @@ def upgrade_local_schema(engine):
             "lifecycle_state": "VARCHAR NOT NULL DEFAULT 'PROPOSED'", "rejection_key": "VARCHAR",
             "rejection_reason": "TEXT", "error_details": "JSON",
         },
+        "operational_tasks": {
+            "priority": "VARCHAR NOT NULL DEFAULT 'NORMAL'",
+            "evidence_inspection_id": "VARCHAR",
+            "acknowledged_at": "VARCHAR",
+            "completed_at": "VARCHAR",
+        },
     }
     with engine.begin() as connection:
         inspector = inspect(connection)
@@ -80,7 +86,7 @@ def _upgrade_action_constraint(engine):
         definition = connection.exec_driver_sql(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='corrective_actions'").scalar_one()
         connection.commit()
-        if "CREATE_REMOVAL_TASK" not in definition:
+        if "ESCALATE_TO_SUPERVISOR" not in definition:
             connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
             connection.commit()
             try:

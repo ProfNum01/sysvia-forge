@@ -374,7 +374,7 @@ class BackendSafetyTests(unittest.TestCase):
         self.assertEqual(len(requests), 5)
         self.assertEqual({tool["function"]["name"] for tool in requests[0]["tools"]},
             {"get_order_details", "get_inspection_results", "check_inventory", "get_pending_actions",
-             "get_order_history", "get_verification_history"})
+             "get_order_history", "get_verification_history", "get_operational_tasks", "get_shipping_state"})
         self.assertEqual(requests[0]["tool_choice"], "auto")
         tool_results = {message["tool_call_id"]: json.loads(message["content"])
                         for message in requests[-1]["messages"] if message["role"] == "tool"}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import hashlib
 import io
 import json
 import math
@@ -19,17 +20,20 @@ from sqlalchemy.orm import object_session
 from pydantic import ValidationError
 
 from backend.app.models.database import (Approval, AuditEvent, CorrectiveAction, Discrepancy, Inspection,
-    InspectionObservation, Inventory, Order, PickingTask, RemovalTask, Product, audit, identifier, timestamp)
+    InspectionObservation, Inventory, Order, PickingTask, RemovalTask, OperationalTask, TaskTransition, Product, audit, identifier, timestamp)
 from backend.app.core.config import ROOT
-from backend.app.schemas.responses import (ActionOut, AuditOut, DashboardOut, HealthOut, IdempotentRequest,
+from backend.app.schemas.responses import (ActionOut, OperationalTaskOut, TaskQueueOut, TaskAssignmentRequest, TaskEscalationRequest, AuditOut, DashboardOut, HealthOut, IdempotentRequest,
     EvidenceRegion, InspectionOut, MetaStatusOut, ObservationInput, OrderOut, ProductOut, RejectionRequest, ShippingRequest)
 from backend.app.services.action_policy import supported_excess, supported_shortfall, unresolved_escalation, validate_recommendations
 from backend.app.services.catalog import reference_path
 from backend.app.services.investigation import investigate_with_read_tools
 from backend.app.services.inventory import available_quantity
 from backend.app.services.media import prepare_image
+from backend.app.services.meta_budget import meta_request_budget
 from backend.app.services.image_quality import analyze_image_quality
+from backend.app.services.evidence_request import reinspection_instructions
 from backend.app.services.provider import run_visual_models
+from backend.app.services.synthetic_registration import validate_synthetic_manifest
 from backend.app.services.reconciliation import reconcile
 from proofsight.meta_api import MetaConfig, MetaConfigurationError, classify_api_error
 
@@ -217,7 +221,13 @@ def meta_status(request: Request):
             "note": "Configured does not mean connected. Status checks do not call paid model APIs."}
 
 
-def create_inspection(request, db, order_id, image, rights_confirmed, parent=None, creation_key=None):
+@router.get("/integrations/meta/budget")
+def meta_budget_status(actor=Depends(supervisor), db=Depends(database)):
+    return meta_request_budget(db)
+
+
+def create_inspection(request, db, order_id, image, rights_confirmed, parent=None, creation_key=None,
+                      evidence_provenance=None):
     if not rights_confirmed:
         raise HTTPException(422, "Confirm that the image is synthetic or you have rights to use it.")
     if creation_key is not None and not re.fullmatch(r"[a-zA-Z0-9_-]{8,100}", creation_key):
@@ -273,7 +283,8 @@ def create_inspection(request, db, order_id, image, rights_confirmed, parent=Non
                             photo_id=photo_id, image_path=str(destination),
                             image_sha256=digest, image_width=width, image_height=height, creation_key=creation_key,
                             processing_stage="IMAGE_VALIDATED", previous_inspection_id=parent.id if parent else None,
-                            provider_metadata={"image_quality": quality, "image_validation_ms": validation_ms,
+            provider_metadata={"image_quality": quality, "evidence_provenance": evidence_provenance,
+                               "image_validation_ms": validation_ms,
                                                "image_quality_ms": quality_ms})
     try:
         db.add(inspection)
@@ -446,6 +457,8 @@ def analyze(request: Request, inspection_id: str, actor=Depends(supervisor), db=
     with request.app.state.mutations:
         inspection = required(db, Inspection, inspection_id)
         order = require_current(db, inspection)
+        if meta_request_budget(db)["remaining_requests"] < 5:
+            raise HTTPException(409, "Cumulative Meta request authorization is exhausted or insufficient for this inspection.")
         quality = (inspection.provider_metadata or {}).get("image_quality", {})
         if (request.app.state.settings.quality_gate_enabled
                 and quality.get("quality_status") in {"RETAKE_RECOMMENDED", "TECHNICAL_FAILURE"}):
@@ -654,6 +667,16 @@ def finish_analysis(db, inspection, result, sam, products, observations, regions
     inspection.processing_stage = "RECONCILIATION_COMPLETED"
     audit(db, "RECONCILIATION_COMPLETED", inspection.id,
           {"status": inspection.reconciliation_status, "latency_ms": latency_ms})
+    task = db.scalar(select(OperationalTask).where(
+        OperationalTask.evidence_inspection_id == inspection.id,
+        OperationalTask.status == "EVIDENCE_SUBMITTED"))
+    if task:
+        task.status = "COMPLETED"
+        task.completed_at = timestamp()
+        task.updated_at = task.completed_at
+        audit(db, "OPERATOR_TASK_COMPLETED", task.id,
+              {"inspection_id": inspection.id, "photo_id": inspection.photo_id,
+               "inspection_status": inspection.status}, task.assigned_operator or "system")
     db.commit()
     db.refresh(inspection)
     return inspection_out(inspection)
@@ -676,6 +699,8 @@ def investigate(request: Request, inspection_id: str,
                 raise HTTPException(409, "This investigation idempotency key belongs to another inspection.")
         if inspection.investigation_status in {"RUNNING", "COMPLETED"}:
             return inspection_out(inspection)
+        if meta_request_budget(db)["remaining_requests"] < 7:
+            raise HTTPException(409, "Cumulative Meta request authorization is exhausted or insufficient for investigation.")
         attempt = timestamp()
         changed = db.execute(update(Inspection).where(Inspection.id == inspection.id,
             Inspection.investigation_status.in_(["NOT_STARTED", "FAILED"])).values(
@@ -753,6 +778,12 @@ def investigate(request: Request, inspection_id: str,
             proposals = validate_recommendations(db, inspection, order, result)
         except (ValueError, TypeError, AttributeError, KeyError):
             return failed("invalid_recommendation", "The proposed actions are not supported by current database evidence. No action was created.", 422, validation=True)
+        audit(db, "VALIDATION_PASSED", inspection.id,
+              {"investigation_id": inspection.investigation_id, "decision": result["decision"],
+               "action_types": [item["type"] for item in proposals],
+               "evidence_references": result["evidence_references"][:20],
+               "approval_required": any(item["requires_approval"] for item in proposals)},
+              actor="deterministic-policy")
         inspection.investigation = result["summary"]
         inspection.investigation_result = result
         inspection.investigation_status = "COMPLETED"
@@ -772,6 +803,20 @@ def investigate(request: Request, inspection_id: str,
                 status="PENDING_APPROVAL", lifecycle_state="PENDING_APPROVAL")
             db.add(action)
             db.flush()
+            if action.type in {"REQUEST_REINSPECTION", "ESCALATE_TO_HUMAN", "REQUEST_HUMAN_REVIEW", "PROPOSE_CORRECTIVE_PICK", "ESCALATE_TO_SUPERVISOR"}:
+                instructions = (reinspection_instructions(inspection, order) if action.type == "REQUEST_REINSPECTION"
+                                else "Supervisor must review the recorded evidence before any corrective operation.")
+                task = OperationalTask(action_id=action.id, order_id=order.id,
+                    inspection_id=inspection.id, type=action.type, status="PENDING_APPROVAL",
+                    priority="HIGH" if action.type in {"ESCALATE_TO_HUMAN", "ESCALATE_TO_SUPERVISOR"} else "NORMAL",
+                    evidence_references=proposal["evidence_references"],
+                    ai_recommendation=result["summary"], instructions=instructions,
+                    approval_required=True)
+                db.add(task)
+                db.flush()
+                audit(db, "OPERATIONAL_TASK_CREATED", task.id,
+                    {"action_id": action.id, "order_id": order.id, "inspection_id": inspection.id,
+                     "status": task.status}, actor)
             audit(db, "ACTION_PROPOSED", inspection.id, {"action_id": action.id, "type": action.type,
                 "investigation_id": inspection.investigation_id})
             audit(db, "APPROVAL_REQUIRED", inspection.id, {"action_id": action.id, "type": action.type})
@@ -789,15 +834,193 @@ def validate_action(db, action):
         raise HTTPException(409, "A shipped order cannot execute corrective operations.")
     if inspection.status not in {"NEEDS_REVIEW", "HELD"}:
         raise HTTPException(409, "This evidence no longer supports a corrective action.")
-    if action.type == "CREATE_PICKING_TASK":
+    if action.type in {"CREATE_PICKING_TASK", "PROPOSE_CORRECTIVE_PICK"}:
         if not inspection.investigation or not supported_shortfall(db, inspection, action.product_id, action.quantity):
             raise HTTPException(409, "Current evidence and inventory do not authorize this picking task.")
     elif action.type == "CREATE_REMOVAL_TASK":
         if not inspection.investigation or not supported_excess(inspection, action.product_id, action.quantity):
             raise HTTPException(409, "Current evidence does not authorize this removal task.")
-    elif action.type not in {"HOLD_ORDER", "HOLD_SHIPMENT", "REQUEST_REINSPECTION", "ESCALATE_TO_HUMAN"}:
+    elif action.type not in {"HOLD_ORDER", "HOLD_SHIPMENT", "REQUEST_REINSPECTION", "ESCALATE_TO_HUMAN", "REQUEST_HUMAN_REVIEW", "ESCALATE_TO_SUPERVISOR"}:
         raise HTTPException(422, "Action type is not permitted by deterministic policy.")
     return inspection, order
+
+
+TASK_NEXT_STEPS = {
+    "PENDING_APPROVAL": "Supervisor must approve the recommended action.",
+    "APPROVED": "Supervisor must execute the approved action.",
+    "OPEN": "Assign this task to the authenticated local operator.",
+    "ASSIGNED": "Acknowledge the assignment.",
+    "ACKNOWLEDGED": "Start the requested work.",
+    "IN_PROGRESS": "Request new visual evidence when ready.",
+    "EVIDENCE_REQUIRED": "Capture and submit a distinct, rights-cleared photo.",
+    "EVIDENCE_SUBMITTED": "Analyze the submitted inspection; the order remains held.",
+    "COMPLETED": "Review the reinspection outcome before any shipping decision.",
+    "ESCALATED": "Supervisor review is required.",
+    "REJECTED": "No operator action is permitted.",
+}
+
+
+def task_queue_out(db, task):
+    order = required(db, Order, task.order_id)
+    inspection = required(db, Inspection, task.inspection_id)
+    provenance = {"synthetic_claude": "SYNTHETIC_CLAUDE",
+                  "physical_capture": "PHYSICAL_CAPTURE"}.get(order.data_source, "SYNTHETIC")
+    registered_followup = True
+    if order.data_source == "synthetic_claude":
+        manifest_path = ROOT / "evaluation" / "datasets" / "synthetic-claude-labeled" / "manifest.json"
+        registered_followup = (manifest_path.is_file() and
+            bool(json.loads(manifest_path.read_text(encoding="utf-8")).get("after_image")))
+    next_step = TASK_NEXT_STEPS.get(task.status, "Review the recorded task status.")
+    if task.status == "EVIDENCE_REQUIRED" and not registered_followup:
+        next_step = "Await a rights-cleared synthetic follow-up registered in the Claude dataset manifest."
+    if task.type in {"PROPOSE_CORRECTIVE_PICK", "CREATE_PICKING_TASK"} and task.status == "IN_PROGRESS":
+        next_step = "Report physical picking completion in the approved action, then request new visual evidence."
+    return TaskQueueOut.model_validate({**OperationalTaskOut.model_validate(task).model_dump(),
+        "order_reference": order.reference, "inspection_photo_id": inspection.photo_id,
+        "evidence_provenance": provenance, "registered_followup_available": registered_followup,
+        "next_step": next_step})
+
+
+@router.get("/operational-tasks", response_model=list[TaskQueueOut])
+def operational_tasks(actor=Depends(supervisor), db=Depends(database)):
+    return [task_queue_out(db, task) for task in db.scalars(
+        select(OperationalTask).order_by(OperationalTask.created_at.desc()).limit(200))]
+
+
+@router.get("/operational-tasks/{task_id}", response_model=TaskQueueOut)
+def operational_task_detail(task_id: str, actor=Depends(supervisor), db=Depends(database)):
+    return task_queue_out(db, required(db, OperationalTask, task_id))
+
+
+@router.get("/operational-tasks/{task_id}/timeline", response_model=list[AuditOut])
+def operational_task_timeline(task_id: str, actor=Depends(supervisor), db=Depends(database)):
+    task = required(db, OperationalTask, task_id)
+    ids = [task.id, task.action_id, task.inspection_id]
+    if task.evidence_inspection_id:
+        ids.append(task.evidence_inspection_id)
+    return list(db.scalars(select(AuditEvent).where(AuditEvent.entity_id.in_(ids))
+        .order_by(AuditEvent.created_at, AuditEvent.id).limit(300)))
+
+
+@router.post("/operational-tasks/{task_id}/evidence", response_model=TaskQueueOut, status_code=201)
+def submit_task_evidence(request: Request, task_id: str, image: Annotated[UploadFile, File()],
+                         rights_confirmed: Annotated[bool, Form()] = False,
+                         evidence_provenance: Annotated[str, Form()] = "",
+                         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+                         actor=Depends(supervisor), db=Depends(database)):
+    with request.app.state.mutations:
+        task = required(db, OperationalTask, task_id)
+        if task.assigned_operator != actor:
+            raise HTTPException(403, "Only the assigned operator can submit task evidence.")
+        if task.status not in {"EVIDENCE_REQUIRED", "EVIDENCE_SUBMITTED"}:
+            raise HTTPException(409, "This task is not ready for evidence submission.")
+        if idempotency_key is None:
+            raise HTTPException(422, "An evidence idempotency key is required.")
+        order = required(db, Order, task.order_id)
+        expected_provenance = {"synthetic_claude": "SYNTHETIC_CLAUDE",
+                               "physical_capture": "PHYSICAL_CAPTURE"}.get(order.data_source, "SYNTHETIC")
+        if evidence_provenance != expected_provenance:
+            raise HTTPException(422, "Evidence provenance does not match this order's registered source.")
+        raw = image.file.read(request.app.state.settings.max_upload_bytes + 1)
+        image.file.seek(0)
+        _, digest, _, normalized, _, _ = prepare_image(image, request.app.state.settings)
+        image.file.seek(0)
+        quality = analyze_image_quality(normalized,
+            min_side=request.app.state.settings.quality_min_side,
+            blur_variance_threshold=request.app.state.settings.quality_blur_variance_threshold)
+        if quality["quality_status"] in {"RETAKE_RECOMMENDED", "TECHNICAL_FAILURE"}:
+            raise HTTPException(422, "Image quality requires a retake before reinspection.")
+        existing_other = db.scalar(select(Inspection.id).where(
+            Inspection.image_sha256 == digest, Inspection.order_id != order.id).limit(1))
+        if existing_other:
+            raise HTTPException(409, "This image is already associated with another order.")
+        if order.data_source == "synthetic_claude":
+            manifest_path = ROOT / "evaluation" / "datasets" / "synthetic-claude-labeled" / "manifest.json"
+            if not manifest_path.is_file():
+                raise HTTPException(409, "The registered Claude synthetic manifest is unavailable.")
+            manifest = validate_synthetic_manifest(manifest_path)
+            after = manifest.get("after_image")
+            if not after:
+                raise HTTPException(409, "No rights-cleared Claude synthetic follow-up is registered for this order.")
+            if hashlib.sha256(raw).digest() != hashlib.sha256((manifest_path.parent / after).read_bytes()).digest():
+                raise HTTPException(422, "This image does not match the registered Claude synthetic follow-up.")
+        packing_manifest = ROOT / "evaluation" / "manifests" / "synthetic-packing.json"
+        if packing_manifest.is_file():
+            for case in json.loads(packing_manifest.read_text(encoding="utf-8")).get("cases", []):
+                source = ROOT / case["evidence"]
+                if source.is_file() and hashlib.sha256(raw).digest() == hashlib.sha256(source.read_bytes()).digest() and case["order_id"] != order.id:
+                    raise HTTPException(409, "This registered synthetic image belongs to another order.")
+        prior = required(db, Inspection, task.inspection_id)
+        uploaded = create_inspection(request, db, task.order_id, image, rights_confirmed,
+                                     prior, creation_key=idempotency_key, evidence_provenance=evidence_provenance)
+        if task.status == "EVIDENCE_SUBMITTED":
+            if task.evidence_inspection_id != uploaded.id:
+                raise HTTPException(409, "This task already has different submitted evidence.")
+            from fastapi.responses import JSONResponse
+            return JSONResponse(task_queue_out(db, task).model_dump(), status_code=200)
+        task.evidence_inspection_id = uploaded.id
+        task.status = "EVIDENCE_SUBMITTED"
+        task.updated_at = timestamp()
+        audit(db, "OPERATOR_EVIDENCE_SUBMITTED", task.id,
+              {"inspection_id": uploaded.id, "photo_id": uploaded.photo_id,
+               "previous_photo_id": prior.photo_id}, actor)
+        db.commit()
+        return task_queue_out(db, task)
+
+
+@router.post("/operational-tasks/{task_id}/{operation}", response_model=TaskQueueOut)
+def transition_operational_task(request: Request, task_id: str, operation: str,
+                                body: TaskAssignmentRequest | TaskEscalationRequest | IdempotentRequest,
+                                actor=Depends(supervisor), db=Depends(database)):
+    allowed = {"assign": ("OPEN", "ASSIGNED"), "acknowledge": ("ASSIGNED", "ACKNOWLEDGED"),
+               "start": ("ACKNOWLEDGED", "IN_PROGRESS"),
+               "request-evidence": ("IN_PROGRESS", "EVIDENCE_REQUIRED"),
+               "escalate": ({"ASSIGNED", "ACKNOWLEDGED", "IN_PROGRESS", "EVIDENCE_REQUIRED"}, "ESCALATED")}
+    if operation not in allowed:
+        raise HTTPException(404, "Task transition was not found.")
+    with request.app.state.mutations:
+        task = required(db, OperationalTask, task_id)
+        existing = db.scalar(select(TaskTransition).where(TaskTransition.idempotency_key == body.idempotency_key))
+        if existing:
+            if existing.task_id == task.id and existing.operation == operation:
+                return task_queue_out(db, task)
+            raise HTTPException(409, "This idempotency key belongs to another task transition.")
+        if operation == "assign":
+            if not isinstance(body, TaskAssignmentRequest) or body.assignee != actor:
+                raise HTTPException(422, "Only the authenticated local identity can be assigned.")
+        elif operation == "escalate":
+            if not isinstance(body, TaskEscalationRequest):
+                raise HTTPException(422, "A reason is required for escalation.")
+        elif isinstance(body, (TaskAssignmentRequest, TaskEscalationRequest)):
+            raise HTTPException(422, "This request includes fields for a different transition.")
+        expected, target = allowed[operation]
+        if task.status not in (expected if isinstance(expected, set) else {expected}):
+            raise HTTPException(409, "Task transition is not allowed from its current state.")
+        action = required(db, CorrectiveAction, task.action_id)
+        if action.status != "EXECUTED":
+            raise HTTPException(409, "Supervisor-approved execution is required before operator work.")
+        order = required(db, Order, task.order_id)
+        if order.latest_inspection_id != task.inspection_id:
+            raise HTTPException(409, "This task belongs to a historical inspection.")
+        task.status = target
+        task.updated_at = timestamp()
+        if operation == "assign":
+            task.assigned_operator = actor
+        elif task.assigned_operator != actor:
+            raise HTTPException(403, "This task is assigned to another operator.")
+        if operation == "acknowledge":
+            task.acknowledged_at = task.updated_at
+        db.add(TaskTransition(task_id=task.id, operation=operation,
+                              idempotency_key=body.idempotency_key, actor=actor))
+        audit(db, "OPERATOR_TASK_" + operation.upper().replace("-", "_"), task.id,
+              {"action_id": action.id, "status": target,
+               **({"reason": body.reason} if isinstance(body, TaskEscalationRequest) else {})}, actor)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "Task transition idempotency key is already in use.") from None
+        return task_queue_out(db, task)
 
 
 @router.post("/actions/{action_id}/approve", response_model=ActionOut)
@@ -814,6 +1037,11 @@ def approve(request: Request, action_id: str, body: IdempotentRequest, actor=Dep
             raise HTTPException(409, "Only a proposed action can be approved.")
         action.status = "APPROVED"
         action.lifecycle_state = "APPROVED"
+        if action.operational_task:
+            action.operational_task.status = "APPROVED"
+            action.operational_task.updated_at = timestamp()
+            audit(db, "OPERATIONAL_TASK_APPROVED", action.operational_task.id,
+                  {"action_id": action.id}, actor)
         db.add(Approval(action_id=action.id, operator=actor, idempotency_key=body.idempotency_key))
         audit(db, "ACTION_APPROVED", action.id, {"type": action.type, "inspection_id": action.inspection_id}, actor)
         try:
@@ -850,7 +1078,7 @@ def execute(request: Request, action_id: str, body: IdempotentRequest, actor=Dep
                 order.status = "HELD"
                 inspection.status = "HELD"
                 action.execution_details = {"order_id": order.id, "order_held": True, "reinspection_required": True}
-            elif action.type == "CREATE_PICKING_TASK":
+            elif action.type in {"CREATE_PICKING_TASK", "PROPOSE_CORRECTIVE_PICK"}:
                 product = required(db, Product, action.product_id)
                 task = PickingTask(id=f"pick-{action.id}", action_id=action.id, approval_id=approval.id,
                     order_id=order.id, order_reference=order.reference, product_id=product.id,
@@ -888,6 +1116,11 @@ def execute(request: Request, action_id: str, body: IdempotentRequest, actor=Dep
                     "status": "PENDING_HUMAN_REVIEW", "reinspection_required": True}
             action.status = "EXECUTED"
             action.lifecycle_state = "AWAITING_REINSPECTION"
+            if action.operational_task:
+                action.operational_task.status = "OPEN"
+                action.operational_task.updated_at = timestamp()
+                audit(db, "OPERATIONAL_TASK_OPENED", action.operational_task.id,
+                    {"action_id": action.id, "approval_id": approval.id}, actor)
             action.execution_key = body.idempotency_key
             action.error_details = None
             audit(db, "CONTROLLED_ACTION_EXECUTED", action.id, {"type": action.type, **action.execution_details}, actor)
@@ -931,6 +1164,11 @@ def reject(request: Request, action_id: str, body: RejectionRequest, actor=Depen
             raise HTTPException(409, "Only an action awaiting approval can be rejected.")
         action.status = "REJECTED"
         action.lifecycle_state = "REJECTED"
+        if action.operational_task:
+            action.operational_task.status = "REJECTED"
+            action.operational_task.updated_at = timestamp()
+            audit(db, "OPERATIONAL_TASK_REJECTED", action.operational_task.id,
+                  {"action_id": action.id}, actor)
         action.rejection_key = body.idempotency_key
         action.rejection_reason = body.reason
         audit(db, "ACTION_REJECTED", action.inspection_id, {"action_id": action.id, "type": action.type}, actor)

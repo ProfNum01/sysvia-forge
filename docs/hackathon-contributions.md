@@ -198,3 +198,36 @@
   - Enabled smooth vertical scrolling on the sidebar.
 
 
+# 2026-11-01 — Task 012 operational action tasks
+
+- Added a local `operational_tasks` table linked to existing corrective actions, orders, and inspections. It records evidence references, the saved AI recommendation, operator instructions, approval requirement, status, assignment, timestamps, and audit events.
+- Extended the structured agent action contract with `REQUEST_HUMAN_REVIEW`, `PROPOSE_CORRECTIVE_PICK`, and `ESCALATE_TO_SUPERVISOR`, while preserving the existing action names. All recommendations still pass deterministic evidence and state checks; only supervisor-approved actions execute.
+- Materialized four eligible, already saved `REQUEST_REINSPECTION` recommendations from the current local database into pending tasks. No Meta inference was called, and no existing recommendation was rewritten. The affected orders remain `HELD`.
+- Added an authenticated operational-task API and displayed linked tasks in the existing Operations workspace. Added tests for task creation, authorization, unsupported evidence, approval, execution, audit, and shipping hold.
+- Local database backup before migration: `data/proofsight.pre-task012.db` (ignored by Git).
+# 2026-11-01 — Task 013 operator task workflow
+
+- Extended the Task 012 operational task record with priority, evidence-inspection linkage, acknowledgment/completion times, and idempotent task transitions. Existing task records were preserved by the local migration.
+- Added authenticated assignment, acknowledgment, work, evidence request/submission, escalation, and task-detail/timeline APIs. Assignment is limited to the only identity supported by the current shared-token auth model, `local-supervisor`; no employee accounts were invented.
+- Linked new reinspection photos to their originating tasks, then marked the human task completed only after the new inspection analysis finished. Task completion remains distinct from order verification and shipping authorization.
+- Added an operator task queue to the existing Operations page with status filters, protected evidence previews, instructions, next steps, controls, and recorded event timelines.
+- Added backend lifecycle/security tests, frontend queue mapping tests, and a read-only Playwright check against the local Docker application. Rebuilt the local services. No paid Meta request was made by this work.
+- Local SQLite backup before migration: `data/proofsight.pre-task013.db` (ignored by Git).
+
+# 2026-11-01 — Task 014 closed-loop reinspection safeguards
+
+- Reused the existing task upload → linked inspection → Muse/SAM analysis → deterministic reconciliation path. Task evidence now requires matching registered provenance, valid image format and size, acceptable decisive quality, a distinct content hash, and no reuse from another order or registered synthetic fixture.
+- Added discrepancy-grounded reinspection instructions that ask for the missing visual facts without turning `NOT_OBSERVED` into absence. Existing unacknowledged tasks receive a logged instruction refinement at startup; AI recommendations remain unchanged.
+- Added a read-only before/after task view showing both saved images, recorded SAM regions, SKU evidence, supported observed quantities, changes, and remaining uncertainty. The task card can explicitly start the existing analysis endpoint when request budget permits.
+- Added a conservative server gate for the original 30-request cumulative Meta authorization. The local audit table currently records 89 attempted Muse, SAM, and agent-model calls, so no additional paid request was made. The Claude-labeled synthetic manifest has no after-image; its task remains awaiting registered follow-up evidence.
+- Packaged the rights-cleared synthetic fixture manifests/images in the backend Docker image after browser verification found the container omitted them; the queue now loads registered follow-up availability without a server error.
+- Added evidence-policy, quality, provenance, cross-order, duplicate, and cumulative-budget tests. No live reinspection or verified result was fabricated.
+
+# 2026-11-01 — Task 015 adaptive investigation
+
+- Audited the existing Muse Spark read-tool loop, saved execution audit, action validator, and supervisor gate. The local database contains a genuine six-tool investigation for inspection `b038207d-7287-454a-a9c3-4adb9fdfe729`: order details, inspection results, pending actions, verification history, inventory, and order history; four recorded model attempts spanned 24.436 seconds. Its saved outcome was human review.
+- Added read-only `get_operational_tasks` and `get_shipping_state` tools to the existing dynamic `tool_choice=auto` agent. An active task can support a cited `EXISTING_ACTION_IN_PROGRESS` decision with no duplicate action. Both model-output validation and deterministic action policy check that task against the current order and inspection.
+- Logged successful deterministic recommendation validation for the existing Operations timeline. No model write capability or shipping release path was added.
+- Added offline mocked-transport scenarios for visual uncertainty, a supported shortfall, and an existing task. They exercise distinct recommendations through the real SQLite-backed tool and policy services; they are not live Meta results.
+- No paid request was made. The local audit has 89 previously attempted model requests (45 agent, 15 Muse analysis, 29 SAM), exceeding the original cumulative authorization of 30. Consequently live adaptive divergence and new Meta inference remain unvalidated.
+

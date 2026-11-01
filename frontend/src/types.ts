@@ -77,6 +77,42 @@ export type Action = {
   lifecycle_state?: string;
   execution_details?: Record<string, unknown> | null;
   rejection_reason?: string | null;
+  operational_task?: {
+    id: string;
+    order_id: string;
+    inspection_id: string;
+    type: string;
+    status: string;
+    instructions: string;
+    assigned_operator: string | null;
+    approval_required: boolean;
+    created_at: string;
+    updated_at: string;
+  } | null;
+};
+export type OperatorTask = {
+  id: string;
+  action_id: string;
+  order_id: string;
+  order_reference: string;
+  evidence_provenance: string;
+  registered_followup_available: boolean;
+  inspection_id: string;
+  inspection_photo_id: string;
+  type: string;
+  status: string;
+  priority: string;
+  evidence_references: string[];
+  ai_recommendation: string;
+  instructions: string;
+  assigned_operator: string | null;
+  approval_required: boolean;
+  evidence_inspection_id: string | null;
+  acknowledged_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  next_step: string;
 };
 export type InvestigationResult = {
   investigation_id?: string;

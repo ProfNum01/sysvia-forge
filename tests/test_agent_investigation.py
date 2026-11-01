@@ -10,9 +10,10 @@ import httpx
 from openai import OpenAI
 from sqlalchemy import func, select
 
-from backend.app.models.database import (Base, CorrectiveAction, Discrepancy, Inspection, InspectionObservation,
+from backend.app.models.database import (Base, CorrectiveAction, OperationalTask, Discrepancy, Inspection, InspectionObservation,
                                         Inventory, Order, connect_database)
 from backend.app.services.investigation import investigate_with_read_tools
+from backend.app.services.action_policy import validate_recommendations
 from backend.app.services.seed import seed_demo
 from proofsight.meta_api import MetaConfig
 
@@ -113,7 +114,7 @@ class AgentInvestigationTests(unittest.TestCase):
         self.assertEqual(result.recommended_actions[0].quantity, 1)
         self.assertEqual({tool["function"]["name"] for tool in self.requests[0]["tools"]},
             {"get_order_details", "get_inspection_results", "check_inventory", "get_pending_actions",
-             "get_order_history", "get_verification_history"})
+             "get_order_history", "get_verification_history", "get_operational_tasks", "get_shipping_state"})
         self.assertEqual(self.requests[0]["tool_choice"], "auto")
         returned = [json.loads(message["content"]) for message in self.requests[-1]["messages"] if message["role"] == "tool"]
         inventory = next(value for value in returned if "quantity_available" in value)
@@ -133,6 +134,75 @@ class AgentInvestigationTests(unittest.TestCase):
         self.assertEqual(result.decision, "HUMAN_REVIEW_REQUIRED")
         names = [details["tool"] for name, details in self.events if name == "TOOL_CALLED"]
         self.assertEqual(names, ["get_inspection_results", "get_order_details"])
+
+    def test_offline_visual_uncertainty_requests_distinct_evidence(self):
+        discrepancy = self.db.get(Discrepancy, "disc-red")
+        discrepancy.type = "NOT_OBSERVED"
+        discrepancy.observed_quantity = None
+        discrepancy.description = "Partially obstructed object; identity cannot be established"
+        self.db.commit()
+        decision = self.decision()
+        decision["summary"] = "The obstructed product is not observed; capture a new unobstructed image."
+        decision["findings"] = [{"type": "NOT_OBSERVED", "product_id": "product-red", "quantity": None,
+            "evidence_references": ["discrepancy:disc-red"]}]
+        decision["recommended_actions"] = [{"type": "REQUEST_REINSPECTION", "product_id": None,
+            "quantity": None, "requires_approval": True,
+            "evidence_references": ["inspection:ins-1", "photo:photo-1", "discrepancy:disc-red"]}]
+        result = self.run_agent(decision)
+        self.assertEqual(result.recommended_actions[0].type, "REQUEST_REINSPECTION")
+        self.assertEqual(result.findings[0].quantity, None)
+        self.assertEqual([details["tool"] for name, details in self.events if name == "TOOL_CALLED"],
+                         ["get_inspection_results", "get_order_details"])
+        approved = validate_recommendations(self.db, self.inspection, self.order, result.model_dump())
+        self.assertEqual(len(approved), 1)
+        self.assertEqual(self.order.status, "NEEDS_REVIEW")
+
+    def test_offline_supported_shortfall_selects_inventory_and_proposes_pick(self):
+        decision = self.decision(picking=True)
+        decision["recommended_actions"][0]["type"] = "PROPOSE_CORRECTIVE_PICK"
+        result = self.run_agent(decision, [[("get_order_details", {"order_id": "order-1001"}),
+            ("get_inspection_results", {"inspection_id": "ins-1"}),
+            ("check_inventory", {"product_id": "product-red"})]])
+        self.assertEqual(result.recommended_actions[0].type, "PROPOSE_CORRECTIVE_PICK")
+        self.assertEqual([details["tool"] for name, details in self.events if name == "TOOL_CALLED"],
+                         ["get_order_details", "get_inspection_results", "check_inventory"])
+        approved = validate_recommendations(self.db, self.inspection, self.order, result.model_dump())
+        self.assertEqual(len(approved), 1)
+        self.assertTrue(approved[0]["requires_approval"])
+        self.assertEqual(self.order.status, "NEEDS_REVIEW")
+
+    def test_active_task_is_read_and_justifies_no_duplicate_action(self):
+        action = CorrectiveAction(id="action-existing", inspection_id="ins-1", type="REQUEST_REINSPECTION",
+            status="EXECUTED", proposal="Request distinct evidence", evidence_references=["inspection:ins-1", "photo:photo-1"])
+        self.db.add(action)
+        self.db.flush()
+        self.db.add(OperationalTask(id="task-existing", action_id=action.id, order_id=self.order.id,
+            inspection_id="ins-1", type="REQUEST_REINSPECTION", status="EVIDENCE_REQUIRED",
+            evidence_references=action.evidence_references, ai_recommendation="Request distinct evidence",
+            instructions="Capture a new image", approval_required=True))
+        self.db.commit()
+        decision = self.decision()
+        decision["decision"] = "EXISTING_ACTION_IN_PROGRESS"
+        decision["recommended_actions"] = []
+        decision["evidence_references"].append("task:task-existing")
+        batches = [[("get_inspection_results", {"inspection_id": "ins-1"}),
+                    ("get_order_details", {"order_id": "order-1001"}),
+                    ("get_operational_tasks", {"order_id": "order-1001"}),
+                    ("get_shipping_state", {"order_id": "order-1001"})]]
+        result = self.run_agent(decision, batches)
+        self.assertEqual(result.decision, "EXISTING_ACTION_IN_PROGRESS")
+        self.assertEqual(result.recommended_actions, [])
+        completed = [details for name, details in self.events if name == "TOOL_COMPLETED"]
+        task_output = next(item["result"] for item in completed if item["tool"] == "get_operational_tasks")
+        self.assertEqual(task_output["tasks"][0]["status"], "EVIDENCE_REQUIRED")
+        self.assertEqual(self.db.scalar(select(func.count()).select_from(CorrectiveAction)), 1)
+        self.assertEqual(validate_recommendations(self.db, self.inspection, self.order, result.model_dump()), [])
+        duplicate = self.decision()
+        duplicate["recommended_actions"][0]["type"] = "REQUEST_REINSPECTION"
+        duplicate["recommended_actions"][0]["evidence_references"] = ["inspection:ins-1", "photo:photo-1"]
+        duplicate["evidence_references"].append("task:task-existing")
+        with self.assertRaises(ValueError):
+            self.run_agent(duplicate, batches)
 
     def test_invalid_tool_arguments_and_cross_order_access_fail_closed(self):
         bad = [("delete_order", {}), ("get_order_details", {"order_id": "order-1002"}),

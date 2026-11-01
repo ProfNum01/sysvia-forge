@@ -134,6 +134,34 @@ class DiscrepancyOut(FromORM):
     description: str
 
 
+class OperationalTaskOut(FromORM):
+    id: str
+    action_id: str
+    order_id: str
+    inspection_id: str
+    type: str
+    status: str
+    evidence_references: list[str]
+    ai_recommendation: str
+    instructions: str
+    assigned_operator: str | None
+    approval_required: bool
+    priority: str
+    evidence_inspection_id: str | None
+    acknowledged_at: str | None
+    completed_at: str | None
+    created_at: str
+    updated_at: str
+
+
+class TaskQueueOut(OperationalTaskOut):
+    order_reference: str
+    inspection_photo_id: str
+    evidence_provenance: str
+    registered_followup_available: bool
+    next_step: str
+
+
 class ActionOut(FromORM):
     id: str
     inspection_id: str
@@ -148,6 +176,7 @@ class ActionOut(FromORM):
     lifecycle_state: str
     rejection_reason: str | None
     error_details: dict | None
+    operational_task: OperationalTaskOut | None = None
 
 
 class InspectionOut(FromORM):
@@ -238,6 +267,14 @@ class DashboardOut(BaseModel):
 class IdempotentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     idempotency_key: str = Field(min_length=8, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
+
+
+class TaskAssignmentRequest(IdempotentRequest):
+    assignee: str = Field(min_length=1, max_length=100)
+
+
+class TaskEscalationRequest(IdempotentRequest):
+    reason: str = Field(min_length=3, max_length=500)
 
 
 class RejectionRequest(IdempotentRequest):

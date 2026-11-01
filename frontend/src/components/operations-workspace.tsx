@@ -35,9 +35,11 @@ import {
   operationEvents,
   operationKeys,
 } from "../lib/operations";
-import { comparisonValue } from "../lib/evidence";
+import { comparisonValue, sourceBox } from "../lib/evidence";
+import { taskView, taskViews, type TaskView } from "../lib/operator-tasks";
+import { useProtectedImage } from "../lib/protected-image";
 import { useResultModal } from "./result-modal";
-import type { Action, Audit, Inspection, Order, VerificationStatus } from "../types";
+import type { Action, Audit, Inspection, OperatorTask, Order, VerificationStatus } from "../types";
 
 function Badge({ value }: { value: string }) {
   return (
@@ -278,7 +280,7 @@ export function RecordedTimeline({
 }
 
 function invalidateOperations(qc: ReturnType<typeof useQueryClient>) {
-  for (const key of ["inspections", "inspection", "audit", "orders", "summary", "verification-status"])
+  for (const key of ["inspections", "inspection", "audit", "orders", "summary", "verification-status", "operational-tasks", "task-timeline"])
     qc.invalidateQueries({ queryKey: [key] });
 }
 
@@ -757,7 +759,7 @@ export function CorrectiveActionCard({
     onSettled: () => invalidateOperations(qc),
   });
   const taskId = typeof a.execution_details?.task_id === "string" ? a.execution_details.task_id : null;
-  const physicalKind = a.type === "CREATE_PICKING_TASK" ? "picking" :
+  const physicalKind = ["CREATE_PICKING_TASK", "PROPOSE_CORRECTIVE_PICK"].includes(a.type) ? "picking" :
     a.type === "CREATE_REMOVAL_TASK" ? "removal" : null;
   const physical = useQuery({
     queryKey: ["verification-status", order?.id, a.id],
@@ -832,6 +834,14 @@ export function CorrectiveActionCard({
           ? a.proposal
           : JSON.stringify(a.proposal)}
       </p>
+      {a.operational_task && (
+        <div className="action-impact">
+          <strong>Operational task · {label(a.operational_task.status)}</strong>
+          <p>{a.operational_task.instructions}</p>
+          <p>Task ID: {a.operational_task.id} · Supervisor approval required</p>
+          {a.operational_task.assigned_operator && <p>Assigned: {a.operational_task.assigned_operator}</p>}
+        </div>
+      )}
       {a.quantity != null && (
         <p className="action-quantity">
           Required quantity: <strong>{a.quantity}</strong>
@@ -1066,10 +1076,176 @@ export function CorrectiveActionCard({
   );
 }
 
+function ComparisonImage({ inspection, token, title }: { inspection: Inspection; token: string; title: string }) {
+  const image = useProtectedImage(`/api/inspections/${inspection.id}/image`, token);
+  return <div className="task-comparison-image"><strong>{title} · {label(inspection.status)}</strong>
+    {image.url ? <svg viewBox={`0 0 ${inspection.image_width} ${inspection.image_height}`} role="img" aria-label={`${title} with actual SAM regions`}>
+      <image href={image.url} width={inspection.image_width} height={inspection.image_height} />
+      {(inspection.regions ?? []).map((region) => {
+        const box = sourceBox(region.box);
+        return box && <rect key={region.id} {...box} fill="none" stroke="#b99cff" strokeWidth="4" />;
+      })}
+    </svg> : <span>{image.error || "Loading authorized image…"}</span>}
+    <small>Photo {inspection.photo_id} · {(inspection.regions ?? []).length} recorded SAM regions</small>
+  </div>;
+}
+
+function TaskEvidenceComparison({ task, token }: { task: OperatorTask; token: string }) {
+  const before = useQuery({ queryKey: ["inspection", task.inspection_id],
+    queryFn: () => api<Inspection>(`/inspections/${task.inspection_id}`) });
+  const after = useQuery({ queryKey: ["inspection", task.evidence_inspection_id],
+    queryFn: () => api<Inspection>(`/inspections/${task.evidence_inspection_id}`),
+    enabled: !!task.evidence_inspection_id });
+  if (!task.evidence_inspection_id) return null;
+  if (before.isPending || after.isPending) return <Pending />;
+  if (before.isError || after.isError) return <p role="alert" className="error-state">Recorded comparison is unavailable.</p>;
+  const first = before.data!, second = after.data!;
+  const beforeRows = new Map((first.comparison ?? []).map((row) => [row.product_id, row]));
+  return <section className="task-comparison" aria-label="Before and after recorded evidence">
+    <h4>Before / after evidence · {label(task.evidence_provenance)}</h4>
+    <p>NOT OBSERVED means the image did not establish visibility. It is not CONFIRMED MISSING.</p>
+    <p>New inspection: {label(second.status)} · Reconciliation: {label(second.reconciliation_status ?? "PENDING_RECONCILIATION")}</p>
+    <div className="task-comparison-images"><ComparisonImage inspection={first} token={token} title="Original" />
+      <ComparisonImage inspection={second} token={token} title="New" /></div>
+    <div className="table-wrap"><table><caption>Actual reconciled observations; an unknown count is never zero.</caption>
+      <thead><tr><th>SKU</th><th>Before</th><th>After</th><th>Change</th><th>Current evidence</th></tr></thead>
+      <tbody>{(second.comparison ?? []).map((row) => {
+        const prior = beforeRows.get(row.product_id);
+        const change = prior?.observed_quantity != null && row.observed_quantity != null
+          ? String(row.observed_quantity - prior.observed_quantity) : "Not established";
+        return <tr key={row.product_id}><td>{row.sku}</td>
+          <td>{prior ? `${label(prior.status)} · ${comparisonValue(prior.observed_quantity)}` : "Not recorded"}</td>
+          <td>{label(row.status)} · {comparisonValue(row.observed_quantity)}</td><td>{change}</td>
+          <td>{row.evidence_region_ids.length} linked SAM regions</td></tr>;
+      })}</tbody></table></div>
+    <div className="task-identity-evidence"><strong>New image identity evidence</strong>
+      {(second.observations ?? []).map((row) => <p key={row.id}>{row.sku ?? "Unidentified"}: {label(row.identification_status ?? "UNCERTAIN")}
+        {row.quantity != null && row.count_certain ? ` · ${row.quantity} observed` : " · quantity not established"}
+        {row.label_text ? ` · label “${row.label_text}”` : " · no readable SKU label"}
+        {row.evidence ? ` · ${row.evidence}` : ""}</p>)}
+      {second.status === "UPLOADED" && <p>New image awaits independent Meta analysis.</p>}
+      {second.status === "PROVIDER_ERROR" && <p>Inference failed; no new observation was accepted.</p>}
+      {second.status === "NEEDS_REVIEW" && <p>Uncertainty remains. Not observed does not mean confirmed missing.</p>}
+      {second.status === "VERIFIED" && <p>Deterministic visual verification passed. Shipping still requires its separate authorized transition.</p>}
+    </div>
+  </section>;
+}
+
+function OperatorTaskCard({ task, token, remainingRequests }: { task: OperatorTask; token: string; remainingRequests: number }) {
+  const qc = useQueryClient();
+  const [expanded, setExpanded] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [rights, setRights] = useState(false);
+  const [showEscalation, setShowEscalation] = useState(false);
+  const [escalationReason, setEscalationReason] = useState("");
+  const preview = useProtectedImage(`/api/inspections/${task.inspection_id}/image`, token);
+  const timeline = useQuery({
+    queryKey: ["task-timeline", task.id],
+    queryFn: () => api<Audit[]>(`/operational-tasks/${task.id}/timeline`),
+    enabled: expanded,
+  });
+  const transition = useMutation({
+    mutationFn: (operation: string) => api<OperatorTask>(`/operational-tasks/${task.id}/${operation}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idempotency_key: operationKeys.get(task.id, operation),
+        ...(operation === "assign" ? { assignee: "local-supervisor" } : {}),
+        ...(operation === "escalate" ? { reason: escalationReason.trim() } : {}) }),
+    }),
+    onSuccess: () => { setShowEscalation(false); invalidateOperations(qc); },
+  });
+  const upload = useMutation({
+    mutationFn: async () => {
+      if (!file || !rights) throw new Error("Select a rights-cleared image and confirm usage rights.");
+      const body = new FormData();
+      body.append("image", file);
+      body.append("rights_confirmed", "true");
+      body.append("evidence_provenance", task.evidence_provenance);
+      return api<OperatorTask>(`/operational-tasks/${task.id}/evidence`, {
+        method: "POST", headers: { "Idempotency-Key": operationKeys.get(task.id, "evidence") }, body,
+      });
+    },
+    onSuccess: () => { setFile(null); invalidateOperations(qc); },
+  });
+  const analyzeEvidence = useMutation({
+    mutationFn: () => api<Inspection>(`/inspections/${task.evidence_inspection_id}/analyze`, { method: "POST" }),
+    onSuccess: () => invalidateOperations(qc),
+  });
+  const nextOperation: Record<string, [string, string]> = {
+    OPEN: ["assign", "Assign to local operator"],
+    ASSIGNED: ["acknowledge", "Acknowledge task"],
+    ACKNOWLEDGED: ["start", "Start work"],
+    IN_PROGRESS: ["request-evidence", "Request new evidence"],
+  };
+  const next = nextOperation[task.status];
+  return <article className="operator-task-card" id={`task-${task.id}`}>
+    <div className="operator-task-head">
+      <div><span className="eyebrow">{task.order_reference} · {task.priority} priority</span>
+        <h3>{actionName(task.type)}</h3>
+        <small>Inspection {task.inspection_id.slice(0, 12)} · Task {task.id.slice(0, 12)}</small>
+      </div>
+      <Badge value={task.status} />
+    </div>
+    <div className="operator-task-body">
+      <div className="operator-task-preview">
+        {preview.url ? <img src={preview.url} alt={`Original inspection for order ${task.order_reference}`} /> :
+          <span>{preview.error || "Loading evidence preview…"}</span>}
+        <Link to={`/inspection?id=${encodeURIComponent(task.inspection_id)}`}>Review original inspection <ArrowRight size={13} aria-hidden="true" /></Link>
+      </div>
+      <div className="operator-task-detail">
+        <p><strong>AI recommendation</strong>{task.ai_recommendation}</p>
+        <p><strong>Operator instructions</strong>{task.instructions}</p>
+        <p><strong>Assigned operator</strong>{task.assigned_operator ?? "Unassigned"}</p>
+        <p className="operator-task-next"><strong>Next step</strong>{task.next_step}</p>
+        {!task.registered_followup_available && <p className="operator-budget-note">No registered Claude synthetic after-image is available for this task.</p>}
+        {task.approval_required && <p className="operator-task-approval">Supervisor approval is required for the underlying action.</p>}
+      </div>
+    </div>
+    <div className="operator-task-controls">
+      {next && <Button size="sm" variant="primary" disabled={!token || transition.isPending}
+        onClick={() => transition.mutate(next[0])}>{next[1]}</Button>}
+      {["ASSIGNED", "ACKNOWLEDGED", "IN_PROGRESS", "EVIDENCE_REQUIRED"].includes(task.status) &&
+        <Button size="sm" variant="warning" disabled={!token || transition.isPending}
+          onClick={() => setShowEscalation(!showEscalation)}>Escalate</Button>}
+      {["PENDING_APPROVAL", "APPROVED"].includes(task.status) &&
+        <Button asChild size="sm" variant="outline"><Link to={`/operations?action=${encodeURIComponent(task.action_id)}#action-${encodeURIComponent(task.action_id)}`}>Review approval action</Link></Button>}
+      {task.type === "PROPOSE_CORRECTIVE_PICK" && task.status === "IN_PROGRESS" &&
+        <Button asChild size="sm" variant="outline"><Link to={`/operations?action=${encodeURIComponent(task.action_id)}#action-${encodeURIComponent(task.action_id)}`}>Report picking work</Link></Button>}
+      {task.evidence_inspection_id && <Button asChild size="sm" variant="outline"><Link to={`/inspection?id=${encodeURIComponent(task.evidence_inspection_id)}`}>Review submitted evidence</Link></Button>}
+      {task.status === "EVIDENCE_SUBMITTED" && <Button size="sm" variant="inspect"
+        disabled={!token || remainingRequests < 5 || analyzeEvidence.isPending}
+        onClick={() => analyzeEvidence.mutate()}>Analyze new image with Meta</Button>}
+      <Button size="sm" variant="ghost" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+        {expanded ? "Hide timeline" : "View timeline"}</Button>
+    </div>
+    {showEscalation && <form className="operator-evidence-form" onSubmit={(event) => { event.preventDefault(); transition.mutate("escalate"); }}>
+      <label htmlFor={`escalation-${task.id}`}>Why can you not continue?</label>
+      <textarea id={`escalation-${task.id}`} minLength={3} maxLength={500} value={escalationReason}
+        onChange={(event) => setEscalationReason(event.target.value)} rows={3} required />
+      <Button type="submit" size="sm" variant="warning" disabled={escalationReason.trim().length < 3 || transition.isPending}>Record escalation</Button>
+    </form>}
+    {task.status === "EVIDENCE_REQUIRED" && <form className="operator-evidence-form" onSubmit={(event) => { event.preventDefault(); upload.mutate(); }}>
+      <label htmlFor={`evidence-${task.id}`}>New inspection photo</label>
+      <input id={`evidence-${task.id}`} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+      <label><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)} /> I confirm this image is synthetic or rights-cleared.</label>
+      <Button type="submit" size="sm" variant="inspect" disabled={!file || !rights || !task.registered_followup_available || upload.isPending}>Submit new evidence</Button>
+      <p>Provenance: {label(task.evidence_provenance)}.</p>
+      {!task.registered_followup_available && <p>No compatible Claude synthetic follow-up is registered yet.</p>}
+      <p>Submission creates a new inspection. Analyze it separately; task completion does not verify the order.</p>
+    </form>}
+    {task.status === "EVIDENCE_SUBMITTED" && remainingRequests < 5 && <p className="operator-budget-note">Meta analysis is blocked by the cumulative request budget. Submitted evidence remains awaiting analysis.</p>}
+    {task.evidence_inspection_id && <TaskEvidenceComparison task={task} token={token} />}
+    {(transition.isError || upload.isError || analyzeEvidence.isError) && <p className="error-state" role="alert">{transition.error?.message ?? upload.error?.message ?? analyzeEvidence.error?.message}</p>}
+    {expanded && (timeline.isPending ? <Pending /> : timeline.isError ? <LoadError error={timeline.error} retry={() => timeline.refetch()} /> :
+      <RecordedTimeline events={timeline.data ?? []} />)}
+  </article>;
+}
+
 export function OperationsWorkspace({ token }: { token: string }) {
   const [params] = useSearchParams();
   const selectedAction = params.get("action");
   const [filter, setFilter] = useState("ALL");
+  const [taskFilter, setTaskFilter] = useState<TaskView>("ALL");
   const activeRequests =
     useIsMutating({ mutationKey: ["investigate"] }) +
     useIsMutating({ mutationKey: ["action"] });
@@ -1090,6 +1266,15 @@ export function OperationsWorkspace({ token }: { token: string }) {
     queryKey: ["orders"],
     queryFn: () => api<Order[]>("/orders"),
   });
+  const taskQuery = useQuery({
+    queryKey: ["operational-tasks"],
+    queryFn: () => api<OperatorTask[]>("/operational-tasks"),
+  });
+  const budget = useQuery({ queryKey: ["meta-budget"], queryFn: () =>
+    api<{ remaining_requests: number; recorded_attempts: number; authorized_requests: number }>("/integrations/meta/budget"),
+    enabled: !!token });
+  const visibleTasks = (taskQuery.data ?? []).filter((task) =>
+    taskFilter === "ALL" || taskView(task.status) === taskFilter);
   const running =
     q.data?.some((i) => i.investigation_status === "RUNNING") ?? false;
   const audit = useQuery({
@@ -1156,6 +1341,20 @@ export function OperationsWorkspace({ token }: { token: string }) {
           </div>
         ))}
       </div>
+      <Surface title="Operator task queue" subtitle="Saved AI requests, supervisor decisions, operator work, and new evidence. Only recorded tasks appear here."
+        action={<span className="count-badge">{taskQuery.data?.length ?? "—"}</span>}>
+        <div className="operator-task-filters" role="toolbar" aria-label="Filter operator tasks">
+          {taskViews.map((view) => <button key={view} type="button" aria-pressed={taskFilter === view}
+            className={taskFilter === view ? "active" : ""} onClick={() => setTaskFilter(view)}>
+            {label(view)} <span>{(taskQuery.data ?? []).filter((task) => view === "ALL" || taskView(task.status) === view).length}</span>
+          </button>)}
+        </div>
+        {taskQuery.isPending ? <Pending /> : taskQuery.isError ? <LoadError error={taskQuery.error} retry={() => taskQuery.refetch()} /> :
+          visibleTasks.length ? <div className="operator-task-list">{visibleTasks.map((task) =>
+            <OperatorTaskCard key={task.id} task={task} token={token}
+              remainingRequests={budget.data?.remaining_requests ?? 0} />)}</div> :
+          <p className="operations-empty-copy">No recorded tasks in this queue.</p>}
+      </Surface>
       <Surface
         title="Investigations"
         subtitle="Persisted decisions and read-tool activity from actual inspection evidence."

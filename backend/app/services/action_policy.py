@@ -1,10 +1,11 @@
 """Deterministic boundaries between model recommendations and operational writes."""
 from sqlalchemy import select
 
-from backend.app.models.database import AuditEvent, CorrectiveAction, Inspection, Inventory
+from backend.app.models.database import AuditEvent, CorrectiveAction, Inspection, Inventory, OperationalTask, Order, audit
 from backend.app.services.inventory import available_quantity
+from backend.app.services.evidence_request import reinspection_instructions
 
-ACTION_TYPES = {"HOLD_SHIPMENT", "CREATE_PICKING_TASK", "CREATE_REMOVAL_TASK", "REQUEST_REINSPECTION", "ESCALATE_TO_HUMAN"}
+ACTION_TYPES = {"HOLD_SHIPMENT", "CREATE_PICKING_TASK", "CREATE_REMOVAL_TASK", "REQUEST_REINSPECTION", "ESCALATE_TO_HUMAN", "REQUEST_HUMAN_REVIEW", "PROPOSE_CORRECTIVE_PICK", "ESCALATE_TO_SUPERVISOR"}
 UNSAFE_PICKING = {"NOT_OBSERVED", "UNCERTAIN", "UNIDENTIFIED", "GEOMETRY_UNCONFIRMED", "UNCLAIMED_GEOMETRY"}
 
 
@@ -21,7 +22,9 @@ def evidence_references(db, inspection, order):
     inspection_ids = select(Inspection.id).where(Inspection.order_id == order.id)
     action_ids = list(db.scalars(select(CorrectiveAction.id).where(CorrectiveAction.inspection_id.in_(inspection_ids))))
     references.update(f"action:{identifier}" for identifier in action_ids)
-    entity_ids = [order.id, *db.scalars(inspection_ids), *action_ids]
+    task_ids = list(db.scalars(select(OperationalTask.id).where(OperationalTask.order_id == order.id)))
+    references.update(f"task:{identifier}" for identifier in task_ids)
+    entity_ids = [order.id, *db.scalars(inspection_ids), *action_ids, *task_ids]
     references.update(f"history:{identifier}" for identifier in db.scalars(select(AuditEvent.id).where(
         AuditEvent.entity_id.in_(entity_ids))))
     return references
@@ -76,7 +79,7 @@ def validate_recommendations(db, inspection, order, result):
     """Reject the entire proposal before any action is persisted."""
     if result.get("verification_required") is not True:
         raise ValueError("verification_required")
-    if result.get("decision") not in {"CORRECTIVE_ACTION_REQUIRED", "HUMAN_REVIEW_REQUIRED", "NO_ACTION_REQUIRED"}:
+    if result.get("decision") not in {"CORRECTIVE_ACTION_REQUIRED", "HUMAN_REVIEW_REQUIRED", "NO_ACTION_REQUIRED", "EXISTING_ACTION_IN_PROGRESS"}:
         raise ValueError("unsupported_decision")
     if result["decision"] == "NO_ACTION_REQUIRED" and inspection.discrepancies:
         raise ValueError("unresolved_evidence")
@@ -125,7 +128,16 @@ def validate_recommendations(db, inspection, order, result):
         if finding.get("quantity") != expected_quantity:
             raise ValueError("unsupported_finding_quantity")
     actions = result.get("recommended_actions")
-    if not isinstance(actions, list) or not actions or len(actions) > 20:
+    if not isinstance(actions, list) or len(actions) > 20:
+        raise ValueError("invalid_actions")
+    if result["decision"] == "EXISTING_ACTION_IN_PROGRESS":
+        active = list(db.scalars(select(OperationalTask).where(
+            OperationalTask.order_id == order.id, OperationalTask.inspection_id == inspection.id,
+            OperationalTask.status.not_in(["COMPLETED", "REJECTED", "ESCALATED"]))))
+        if actions or not active or not any(f"task:{task.id}" in refs for task in active):
+            raise ValueError("unsupported_existing_task")
+        return []
+    if not actions and result["decision"] != "NO_ACTION_REQUIRED":
         raise ValueError("invalid_actions")
     seen = set()
     for action in actions:
@@ -135,7 +147,7 @@ def validate_recommendations(db, inspection, order, result):
         if not isinstance(action_refs, list) or not action_refs or any(ref not in refs for ref in action_refs):
             raise ValueError("unsupported_action_evidence")
         product_id, quantity = action.get("product_id"), action.get("quantity")
-        if action["type"] == "CREATE_PICKING_TASK":
+        if action["type"] in {"CREATE_PICKING_TASK", "PROPOSE_CORRECTIVE_PICK"}:
             discrepancy = next((row for row in inspection.discrepancies if row.type == "SHORTFALL" and row.product_id == product_id), None)
             product_regions = {rid for row in inspection.observations if row.product_id == product_id
                                and row.identification_status == "MATCHED" for rid in row.evidence_region_ids}
@@ -146,7 +158,7 @@ def validate_recommendations(db, inspection, order, result):
                     or not any(f"region:{rid}" in action_refs for rid in product_regions)):
                 raise ValueError("unsupported_picking")
             pending = db.scalar(select(CorrectiveAction.id).join(Inspection).where(Inspection.order_id == order.id,
-                CorrectiveAction.type == "CREATE_PICKING_TASK", CorrectiveAction.product_id == product_id,
+                CorrectiveAction.type.in_(["CREATE_PICKING_TASK", "PROPOSE_CORRECTIVE_PICK"]), CorrectiveAction.product_id == product_id,
                 CorrectiveAction.status.not_in(["REJECTED", "FAILED"])).limit(1))
             if pending:
                 raise ValueError("duplicate_picking")
@@ -167,6 +179,19 @@ def validate_recommendations(db, inspection, order, result):
                 raise ValueError("duplicate_removal")
         elif product_id is not None or quantity is not None:
             raise ValueError("unexpected_action_parameters")
+        if action["type"] == "REQUEST_REINSPECTION":
+            if (inspection.status not in {"NEEDS_REVIEW", "HELD"}
+                    or f"inspection:{inspection.id}" not in action_refs
+                    or f"photo:{inspection.photo_id}" not in action_refs):
+                raise ValueError("unsupported_reinspection")
+        if action["type"] in {"REQUEST_REINSPECTION", "ESCALATE_TO_HUMAN", "REQUEST_HUMAN_REVIEW", "ESCALATE_TO_SUPERVISOR"}:
+            equivalent = {"ESCALATE_TO_HUMAN", "REQUEST_HUMAN_REVIEW", "ESCALATE_TO_SUPERVISOR"} if action["type"] != "REQUEST_REINSPECTION" else {"REQUEST_REINSPECTION"}
+            pending = db.scalar(select(CorrectiveAction.id).join(Inspection).where(
+                Inspection.order_id == order.id, CorrectiveAction.type.in_(equivalent),
+                CorrectiveAction.status.not_in(["REJECTED", "FAILED", "SUPERSEDED"]),
+                Inspection.resolved_by_inspection_id.is_(None)).limit(1))
+            if pending:
+                raise ValueError("duplicate_operational_task")
         key = (action["type"], product_id)
         if key in seen:
             raise ValueError("duplicate_action")
@@ -179,3 +204,43 @@ def unresolved_escalation(db, order_id):
         Inspection.id == CorrectiveAction.inspection_id).where(Inspection.order_id == order_id,
         Inspection.resolved_by_inspection_id.is_(None),
         CorrectiveAction.type == "ESCALATE_TO_HUMAN", CorrectiveAction.status != "REJECTED").limit(1)) is not None
+
+
+def backfill_existing_reinspection_tasks(db):
+    """Materialize current, already recorded agent recommendations without new model calls."""
+    actions = list(db.scalars(select(CorrectiveAction).where(
+        CorrectiveAction.type == "REQUEST_REINSPECTION",
+        CorrectiveAction.status.in_(["PENDING_APPROVAL", "APPROVED", "EXECUTED"]))))
+    for action in actions:
+        inspection = db.get(Inspection, action.inspection_id)
+        order = db.get(Order, inspection.order_id) if inspection else None
+        if action.operational_task:
+            task = action.operational_task
+            if (order and order.latest_inspection_id == inspection.id
+                    and task.status in {"PENDING_APPROVAL", "APPROVED", "OPEN"}
+                    and task.acknowledged_at is None):
+                instructions = reinspection_instructions(inspection, order)
+                if task.instructions != instructions:
+                    task.instructions = instructions
+                    audit(db, "OPERATIONAL_TASK_INSTRUCTIONS_REFINED", task.id,
+                          {"inspection_id": inspection.id, "action_id": action.id}, "system-policy")
+            continue
+        result = inspection.investigation_result if inspection else None
+        if (not order or order.latest_inspection_id != inspection.id
+                or inspection.status not in {"NEEDS_REVIEW", "HELD"}
+                or not isinstance(result, dict) or result.get("decision") != "HUMAN_REVIEW_REQUIRED"
+                or not any(row.get("type") == "REQUEST_REINSPECTION" for row in result.get("recommended_actions", [])
+                           if isinstance(row, dict))
+                or f"photo:{inspection.photo_id}" not in action.evidence_references
+                or f"inspection:{inspection.id}" not in action.evidence_references):
+            continue
+        task = OperationalTask(action_id=action.id, order_id=order.id, inspection_id=inspection.id,
+            type=action.type, status="OPEN" if action.status == "EXECUTED" else action.status,
+            evidence_references=action.evidence_references,
+            ai_recommendation=action.proposal,
+            instructions=reinspection_instructions(inspection, order),
+            approval_required=True)
+        db.add(task)
+        db.flush()
+        audit(db, "OPERATIONAL_TASK_BACKFILLED", task.id,
+              {"action_id": action.id, "order_id": order.id, "inspection_id": inspection.id}, "system-migration")
