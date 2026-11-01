@@ -140,13 +140,13 @@ function TokenProvider({ children }: { children: React.ReactNode }) {
   );
 }
 const nav = [
-  { to: "/", label: "Overview", icon: LayoutDashboard },
-  { to: "/orders", label: "Orders", icon: Package },
-  { to: "/inspection", label: "Visual Inspection", icon: ScanLine },
-  { to: "/operations", label: "AI Operations", icon: Sparkles },
-  { to: "/history", label: "Verification History", icon: FileSearch },
-  { to: "/demo", label: "Demo Workspace", icon: Presentation },
-  { to: "/settings", label: "Settings", icon: Settings2 },
+  { to: "/", label: "Overview", icon: LayoutDashboard, accent: "blue", tag: "DASH" },
+  { to: "/orders", label: "Orders", icon: Package, accent: "teal", tag: "MANIFEST" },
+  { to: "/inspection", label: "Visual Inspection", icon: ScanLine, accent: "cyan", tag: "VISION" },
+  { to: "/operations", label: "AI Operations", icon: Sparkles, accent: "purple", tag: "AGENT" },
+  { to: "/history", label: "Verification History", icon: FileSearch, accent: "amber", tag: "LEDGER" },
+  { to: "/demo", label: "Demo Workspace", icon: Presentation, accent: "rose", tag: "DEMO" },
+  { to: "/settings", label: "Settings", icon: Settings2, accent: "slate", tag: "CONFIG" },
 ];
 function Status({ value }: { value: string }) {
   return (
@@ -231,16 +231,24 @@ function PageHeading({
   title,
   description,
   action,
+  accent = "blue",
+  badge,
 }: {
   eyebrow: string;
   title: string;
   description: string;
   action?: React.ReactNode;
+  accent?: "blue" | "teal" | "cyan" | "purple" | "amber" | "rose" | "slate";
+  badge?: string;
 }) {
   return (
-    <div className="page-heading">
-      <div>
-        <div className="eyebrow">{eyebrow}</div>
+    <div className={`page-heading page-accent-${accent}`}>
+      <div className="page-heading-main">
+        <div className="eyebrow">
+          <span className={`page-eyebrow-dot dot-${accent}`} aria-hidden="true" />
+          {eyebrow}
+          {badge && <span className={`page-accent-badge badge-${accent}`}>{badge}</span>}
+        </div>
         <h1>{title}</h1>
         <p>{description}</p>
       </div>
@@ -316,11 +324,14 @@ function Shell() {
               end={n.to === "/"}
               onClick={() => setOpen(false)}
               className={({ isActive }) =>
-                `nav-link ${isActive ? "active" : ""}`
+                `nav-link nav-accent-${n.accent} ${isActive ? "active" : ""}`
               }
             >
-              <n.icon size={19} aria-hidden="true" />
-              {n.label}
+              <span className={`nav-icon-wrap icon-${n.accent}`}>
+                <n.icon size={18} aria-hidden="true" />
+              </span>
+              <span className="nav-label">{n.label}</span>
+              <span className={`nav-tag tag-${n.accent}`}>{n.tag}</span>
               {n.to === "/inspection" && <span className="nav-dot" />}
             </NavLink>
           ))}
@@ -425,6 +436,8 @@ function Overview() {
         eyebrow="OPERATIONAL INTELLIGENCE"
         title="See the order. Verify the reality."
         description="One workspace to connect physical evidence, AI reasoning, and accountable action."
+        accent="blue"
+        badge="SYSTEM OVERVIEW"
         action={
           <Button asChild>
             <Link to="/inspection">
@@ -737,6 +750,14 @@ function Orders() {
         .toLowerCase()
         .includes(search.toLowerCase()),
     ) ?? [];
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const filteredRows = rows.filter((o) => {
+    if (statusFilter === "ALL") return true;
+    if (statusFilter === "PENDING") return o.status === "PENDING" || o.status === "PENDING_INSPECTION";
+    if (statusFilter === "HELD") return o.status === "HELD" || o.shipping_status === "HELD";
+    if (statusFilter === "VERIFIED") return o.status === "VERIFIED";
+    return true;
+  });
   const order = q.data?.find((o) => o.id === selected);
   return (
     <>
@@ -744,6 +765,8 @@ function Orders() {
         eyebrow="EXPECTED REALITY"
         title="Orders"
         description="Define what should be there before checking what actually is."
+        accent="teal"
+        badge="AUTHORITATIVE MANIFESTS"
         action={
           <span className="synthetic-label">
             <Database size={14} aria-hidden="true" />
@@ -751,6 +774,24 @@ function Orders() {
           </span>
         }
       />
+      <div className="orders-filter-bar">
+        {[
+          { key: "ALL", label: "All Orders", count: rows.length },
+          { key: "PENDING", label: "Awaiting Inspection", count: rows.filter(o => o.status === "PENDING" || o.status === "PENDING_INSPECTION").length },
+          { key: "HELD", label: "On Hold", count: rows.filter(o => o.status === "HELD" || o.shipping_status === "HELD").length },
+          { key: "VERIFIED", label: "Verified Reality", count: rows.filter(o => o.status === "VERIFIED").length },
+        ].map(filter => (
+          <button
+            key={filter.key}
+            type="button"
+            className={`filter-chip ${statusFilter === filter.key ? "active" : ""}`}
+            onClick={() => setStatusFilter(filter.key)}
+          >
+            <span>{filter.label}</span>
+            <small>{filter.count}</small>
+          </button>
+        ))}
+      </div>
       <Panel
         title="Order workspace"
         subtitle="Select an order to inspect its expected items."
@@ -772,7 +813,7 @@ function Orders() {
           <Loading />
         ) : q.isError ? (
           <ErrorState error={q.error} retry={() => q.refetch()} />
-        ) : rows.length ? (
+        ) : filteredRows.length ? (
           <div className="table-wrap">
             <table>
               <thead>
@@ -788,8 +829,8 @@ function Orders() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((o) => (
-                  <tr key={o.id}>
+                {filteredRows.map((o) => (
+                  <tr key={o.id} className={o.id === selected ? "is-selected-row" : ""}>
                     <td>
                       <button
                         className="table-link"
@@ -886,6 +927,7 @@ function InspectionTable({ inspections }: { inspections: Inspection[] }) {
           <tr>
             <th>Inspection / order</th>
             <th>Result</th>
+            <th>Photo ID / Custody</th>
             <th>Recorded</th>
             <th>
               <span className="sr-only">View</span>
@@ -908,6 +950,14 @@ function InspectionTable({ inspections }: { inspections: Inspection[] }) {
               </td>
               <td>
                 <Status value={i.status} />
+              </td>
+              <td>
+                <code className="photo-id-pill" title={i.photo_id}>
+                  {i.photo_id.slice(0, 16)}…
+                </code>
+                <span className="cell-subtitle">
+                  {i.reconciliation_status ? label(i.reconciliation_status) : "Original record"}
+                </span>
               </td>
               <td className="muted">{formatTime(i.created_at)}</td>
               <td>
@@ -1057,6 +1107,9 @@ function InspectionPage() {
     },
   });
   const current = inspection.data;
+  const pendingActions = current?.actions?.filter(
+    (a) => a.investigation_id && a.status !== "EXECUTED"
+  ) ?? [];
   const selected = orders.data?.find(
     (o) => o.id === (current?.order_id ?? orderId),
   );
@@ -1102,6 +1155,8 @@ function InspectionPage() {
         eyebrow="PHYSICAL EVIDENCE"
         title="Visual Inspection"
         description="Compare the expected order with a real image. Let evidence set the confidence."
+        accent="cyan"
+        badge="PERCEPTION WORKSPACE"
         action={
           id && (
             <Button
@@ -1135,6 +1190,23 @@ function InspectionPage() {
                 ? "A new image creates a separate inspection and preserves the original."
                 : "Only synthetic or rights-cleared imagery. PNG, JPEG, or WebP · up to 15 MiB."
             }
+            action={
+              reinspect && id ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setReinspect(false);
+                    setFile(null);
+                    setRights(false);
+                    setFormError("");
+                    setParams({ id });
+                  }}
+                >
+                  View current inspection
+                </Button>
+              ) : undefined
+            }
           >
             {!id || reinspect ? (
               <form
@@ -1142,6 +1214,10 @@ function InspectionPage() {
                 onSubmit={(e) => {
                   e.preventDefault();
                   setFormError("");
+                  if (reinspect && pendingActions.length > 0) {
+                    setFormError("Approve and execute pending corrective actions before reinspection.");
+                    return;
+                  }
                   const error = validateImage(file, rights);
                   if (error) {
                     setFormError(error);
@@ -1150,6 +1226,24 @@ function InspectionPage() {
                   upload.mutate();
                 }}
               >
+                {reinspect && pendingActions.length > 0 && (
+                  <div className="pending-actions-callout" role="alert">
+                    <div className="pending-actions-header">
+                      <CircleAlert size={18} aria-hidden="true" />
+                      <div>
+                        <strong>Action required before reinspection</strong>
+                        <p>
+                          The investigation proposed corrective actions that must be approved and executed before submitting new evidence.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="pending-actions-list">
+                      {pendingActions.map((action) => (
+                        <ActionCard key={action.id} action={action} inspection={current} />
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {!reinspect && (
                   <div className="field">
                     <label htmlFor="order-select">Order to inspect</label>
@@ -1264,10 +1358,15 @@ function InspectionPage() {
                     {formError || upload.error?.message}
                   </p>
                 )}
+                {reinspect && pendingActions.length > 0 && (
+                  <p className="field-error">
+                    Approve and execute the pending corrective action(s) above before uploading new evidence.
+                  </p>
+                )}
                 <Button
                   type="submit"
                   disabled={
-                    !token || upload.isPending || (!reinspect && orders.isError)
+                    !token || upload.isPending || (!reinspect && orders.isError) || (reinspect && pendingActions.length > 0)
                   }
                 >
                   {upload.isPending ? (
@@ -1348,7 +1447,10 @@ function InspectionPage() {
                       </div>
                     )}
                   </dl>
-                  <InspectionProgress inspection={current} />
+                  <InspectionProgress
+                    inspection={current}
+                    isAnalyzing={analyze.isPending || current.status === "ANALYZING"}
+                  />
                   {current.provider_metadata?.image_quality && (
                     <div className="inline-note" role="status">
                       <CircleAlert size={16} aria-hidden="true" />
@@ -1775,40 +1877,52 @@ function VerificationComparison({ inspection }: { inspection: Inspection }) {
       {previous.isPending ? <Loading /> : previous.isError ?
         <ErrorState error={previous.error} retry={() => previous.refetch()} /> : previous.data && (
           <>
-            <div className="verification-summary">
-              <p><strong>Final decision:</strong> {status.data ? label(status.data.verification_status) : label(inspection.status)}</p>
-              <p><strong>Order revision:</strong> {status.data ?
-                `${status.data.revision_current ? "Current" : "Changed"} (order ${status.data.order_version}, evidence ${status.data.inspection_order_version ?? "unknown"})` :
-                "Sign in to check the current order revision."}</p>
-              <p><strong>Original discrepancies:</strong> {previous.data.discrepancies.length ?
-                previous.data.discrepancies.map((item) => label(item.type)).join(", ") : "None recorded"}</p>
-              <p><strong>Current discrepancies:</strong> {inspection.discrepancies.length ?
-                inspection.discrepancies.map((item) => label(item.type)).join(", ") : "None recorded"}</p>
-              <p><strong>Corrective actions:</strong> {previous.data.actions.length ?
-                previous.data.actions.map((item) => `${label(item.type)}: ${label(item.status)}`).join(", ") : "None recorded"}</p>
-              <p><strong>Picking tasks:</strong> {status.data ?
-                status.data.picking_tasks.length ? status.data.picking_tasks.map((item) =>
-                  `${item.product_id} × ${item.quantity}: ${label(item.status)}`).join(", ") : "None" : "Sign in to view"}</p>
-              <p><strong>Removal tasks:</strong> {status.data ?
-                status.data.removal_tasks.length ? status.data.removal_tasks.map((item) =>
-                  `${item.product_id} × ${item.quantity}: ${label(item.status)}`).join(", ") : "None" : "Sign in to view"}</p>
+            <div className="verification-summary verification-kpi-grid">
+              <div className="kpi-card">
+                <span className="kpi-label">Final decision</span>
+                <strong className="kpi-value">{status.data ? label(status.data.verification_status) : label(inspection.status)}</strong>
+                <small className="kpi-sub">{status.data?.verification_status === "VERIFIED" ? "Deterministic match" : "Requires review / hold"}</small>
+              </div>
+              <div className="kpi-card">
+                <span className="kpi-label">Order revision</span>
+                <strong className="kpi-value">{status.data ? (status.data.revision_current ? "Revision Current" : "Revision Changed") : "Checking…"}</strong>
+                <small className="kpi-sub">{status.data ? `Order v${status.data.order_version} · Evidence v${status.data.inspection_order_version ?? "1"}` : "Sign in to verify"}</small>
+              </div>
+              <div className="kpi-card">
+                <span className="kpi-label">Discrepancies</span>
+                <strong className="kpi-value">{inspection.discrepancies.length} Active</strong>
+                <small className="kpi-sub">{previous.data.discrepancies.length} previously detected</small>
+              </div>
+              <div className="kpi-card">
+                <span className="kpi-label">Warehouse tasks</span>
+                <strong className="kpi-value">
+                  {status.data ? (status.data.picking_tasks.length + status.data.removal_tasks.length) : previous.data.actions.length} Tasks
+                </strong>
+                <small className="kpi-sub">
+                  {status.data?.picking_tasks.some(t => t.status === "COMPLETED") ? "Physical pick completed" : "Physical workflow"}
+                </small>
+              </div>
             </div>
             <div className="verification-images">
               {[previous.data, inspection].map((item, index) => (
-                <figure key={item.id}>
-                  <figcaption>{index === 0 ? "BEFORE CORRECTION" : "AFTER CORRECTION"} · {formatTime(item.created_at)} · {label(item.status)}</figcaption>
+                <figure key={item.id} className="verification-figure">
+                  <figcaption className={index === 0 ? "figure-caption-before" : "figure-caption-after"}>
+                    <span className="figure-badge">{index === 0 ? "BEFORE CORRECTION" : "AFTER CORRECTION"}</span>
+                    <span>{formatTime(item.created_at)}</span>
+                    <Status value={item.status} />
+                  </figcaption>
                   <ProtectedEvidenceImage path={item.annotation_url ?? item.image_url}
                     alt={`${index === 0 ? "Original" : "New"} inspection evidence`} />
-                  <small>Photo ID: {item.photo_id}</small>
+                  <small className="photo-id-tag">Photo ID: {item.photo_id}</small>
                 </figure>
               ))}
             </div>
             <table className="comparison-table"><thead><tr><th>Product</th><th>Required</th><th>Before</th><th>After</th><th>Result</th></tr></thead>
               <tbody>{inspection.comparison?.map((row) => {
                 const before = previous.data?.comparison?.find((item) => item.product_id === row.product_id);
-                return <tr key={row.product_id}><td>{row.name}</td><td>{row.required_quantity}</td>
+                return <tr key={row.product_id}><td><strong>{row.name}</strong></td><td>{row.required_quantity}</td>
                   <td>{before?.observed_quantity ?? "Unknown"}</td><td>{row.observed_quantity ?? "Unknown"}</td>
-                  <td>{label(row.status)}</td></tr>;
+                  <td><Status value={row.status} /></td></tr>;
               })}</tbody>
             </table>
             <div className="shipping-safety-box" style={{ marginTop: "1.25rem", padding: "1rem", border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
@@ -1907,6 +2021,8 @@ function Operations() {
         eyebrow="CONTROLLED AUTONOMY"
         title="AI Operations"
         description="Investigate real evidence, review validated proposals, and authorize accountable actions."
+        accent="purple"
+        badge="HUMAN SUPERVISOR GATE"
       />
       <div className="notice">
         <ShieldCheck size={16} aria-hidden="true" />
@@ -1961,6 +2077,8 @@ function History() {
         eyebrow="PROOF, PRESERVED"
         title="Verification History"
         description="Follow each inspection, its original photo, and every subsequent reinspection."
+        accent="amber"
+        badge="AUDITABLE LEDGER"
       />
       <Panel
         title="Inspection ledger"
@@ -2012,8 +2130,13 @@ function History() {
 function Demo() {
   const { token } = useContext(TokenContext);
   return <>
-    <PageHeading eyebrow="CONTROLLED PRESENTATION" title="Demo Workspace"
-      description="Run the real ProofSight workflow with rights-cleared synthetic scenes and isolated seed orders." />
+    <PageHeading
+      eyebrow="CONTROLLED PRESENTATION"
+      title="Demo Workspace"
+      description="Run the real ProofSight workflow with rights-cleared synthetic scenes and isolated seed orders."
+      accent="rose"
+      badge="SANDBOX DEMO"
+    />
     <DemoWorkspace token={token} />
   </>;
 }
@@ -2032,6 +2155,8 @@ function Settings() {
         eyebrow="WORKSPACE CONFIGURATION"
         title="Settings"
         description="Inspect integration readiness and authorize this browser session."
+        accent="slate"
+        badge="GATEWAYS & TOKENS"
       />
       <div className="settings-grid">
         <Panel

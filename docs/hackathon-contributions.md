@@ -1,5 +1,12 @@
 # Hackathon contributions
 
+## 2026-11-01 — Claude synthetic live inspection and review agent
+
+- Diagnosed the Claude catalog's SAM prompt as a provenance sentence rather than a short object phrase. Added a failing provider test, then sent the registered product's noun phrase to SAM for this catalog. No SKU, count, expected quantity, or discrepancy was injected into model results.
+- Analyzed saved inspection `b038207d-7287-454a-a9c3-4adb9fdfe729` using 1 live Muse Spark 1.3 and 2 live SAM 3.1 requests. The saved evidence grounds two BLUE-BOX and one RED-CAN observations to three actual SAM regions. YELLOW-POUCH is `NOT_OBSERVED`, not confirmed absent; inspection remains `NEEDS_REVIEW`, shipping `HELD`.
+- Ran the live read-tool agent using 4 Muse requests and 6 read tools. It returned `HUMAN_REVIEW_REQUIRED` and proposed `REQUEST_REINSPECTION` and `ESCALATE_TO_HUMAN`, both pending approval. No picking task, approval, execution, or verification was claimed. Private per-request ledger: `data/experiments/ledger.json`; 7/30 paid calls, estimated Standard-mode upper-bound cost $0.069571 using published token and SAM image prices; actual billed amount unavailable.
+- Expanded the browser check to reopen saved Claude evidence, compare expected and observed quantities, show SAM regions and the pending review action. Labeled synthetic investigation and action cards so their text cannot be mistaken for physical validation. Older unlabeled cases remain separate; no additional paid secondary validation was warranted by the `NOT_OBSERVED` limitation.
+
 ## 2026-11-01 — Task 010 physical identity preparation
 
 - Added strict local registration for owner-supplied `PHYSICAL_CAPTURE` product references and distinct before/after images. Registration requires explicit rights, visible SKU labels, owner-provided inventory, and a matching order; it creates no inspection or inferred result. Added a private physical dataset import location and validation-only CLI mode.
@@ -119,3 +126,21 @@
 
 - Moved five owner-confirmed Claude AI generated PNGs unchanged from the physical capture staging folder to `evaluation/datasets/synthetic-claude-labeled/`; SHA-256 hashes were preserved. Added an explicit `SYNTHETIC` manifest with fictional inventory of 10 per SKU and a separate order.
 - Added isolated synthetic registration, references, and a Demo Workspace scene entry. Registered four products with fictional test inventory of 10 each and uploaded the before image as an `UPLOADED` inspection; no model analysis was run. Physical registration rules were preserved. No new paid Meta inference was authorized; existing live records did not match the new before-image hash. Physical validation remains blocked.
+
+## 2026-11-01 — Full operational UI/UX overhaul & live progress trackers
+
+- Re-engineered the application interface to provide distinct visual identities and active operational progress for every workflow:
+  - Added distinct color accents and micro-badges to all routes in navigation and headers: Overview (blue / `SYSTEM OVERVIEW`), Orders (teal / `AUTHORITATIVE MANIFESTS`), Visual Inspection (cyan / `PERCEPTION WORKSPACE`), AI Operations (purple / `HUMAN SUPERVISOR GATE`), Verification History (amber / `AUDITABLE LEDGER`), Demo Workspace (rose / `SANDBOX DEMO`), Settings (slate / `GATEWAYS & TOKENS`).
+  - Implemented `ActiveInspectionProgress` with a 4-stage pipeline (Image Ingestion -> Muse Spark 1.3 -> SAM 3.1 -> Policy Reconciliation), elapsed timer, pulsing radar dot, and shimmering progress bar.
+  - Implemented `ActiveInvestigationProgress` in AI Operations with a 4-stage tool pipeline (Order Manifest -> Meta Muse Spark -> Read-Tool Check -> Proposal Synthesizer), elapsed timer, and live stage status message.
+  - Upgraded physical warehouse task display in `CorrectiveActionCard` into a dedicated `.warehouse-task-box` with status indicators (`OPEN` vs `COMPLETED`), clear operator reporting controls, and explicit notice that physical execution requires a new photo for verification.
+  - Enhanced Verification Comparison to `verification-kpi-grid` with 4 KPI cards and figure caption badges.
+  - Added interactive filtering chips to `Orders()` with real-time count badges ("All Orders", "Awaiting Inspection", "On Hold", "Verified Reality").
+  - Added Photo ID custody column and `.photo-id-pill` badges to the Verification History ledger table.
+  - Resolved legacy inspection `order_version` handling in `backend/app/api/routes.py` to prevent false conflict errors during reinspection.
+- Tests & Verification:
+  - Backend: 154/154 tests passed in 15.4s.
+  - Frontend: 24/24 Vitest tests passed across 5 test suites.
+  - Production build: `tsc -b && vite build` passed cleanly in 3.41s.
+  - Backend and frontend daemons active and responding (HTTP 200).
+

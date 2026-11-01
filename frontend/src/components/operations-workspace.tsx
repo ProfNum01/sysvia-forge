@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   useIsMutating,
@@ -9,11 +9,15 @@ import {
 import {
   Activity,
   ArrowRight,
+  Check,
   CircleAlert,
+  Clock3,
+  Database,
   FileSearch,
   GitBranch,
   LoaderCircle,
   LockKeyhole,
+  Package,
   Play,
   RefreshCw,
   ShieldCheck,
@@ -169,6 +173,142 @@ function invalidateOperations(qc: ReturnType<typeof useQueryClient>) {
     qc.invalidateQueries({ queryKey: [key] });
 }
 
+export function ActiveInvestigationProgress({
+  orderRef,
+  inspectionId,
+}: {
+  orderRef?: string;
+  inspectionId?: string;
+}) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setElapsed((prev) => Math.round((prev + 0.1) * 10) / 10);
+    }, 100);
+    return () => clearInterval(timer);
+  }, []);
+
+  const stages = [
+    {
+      id: "manifest",
+      label: "Order Manifest",
+      desc: "Reading target SKUs & quantities",
+      icon: Database,
+    },
+    {
+      id: "muse",
+      label: "Meta Muse Spark",
+      desc: "Reasoning over discrepancies",
+      icon: Sparkles,
+    },
+    {
+      id: "tools",
+      label: "Read-Tool Check",
+      desc: "Auditing stock & history ledger",
+      icon: FileSearch,
+    },
+    {
+      id: "proposal",
+      label: "Proposal Synthesizer",
+      desc: "Drafting supervisor action gate",
+      icon: ShieldCheck,
+    },
+  ];
+
+  const currentStageIndex =
+    elapsed < 2.5 ? 0 : elapsed < 6.0 ? 1 : elapsed < 10.0 ? 2 : 3;
+
+  const currentStage = stages[currentStageIndex];
+
+  const progressPercent = Math.min(
+    95,
+    Math.round(
+      elapsed < 2.5
+        ? (elapsed / 2.5) * 25
+        : elapsed < 6.0
+          ? 25 + ((elapsed - 2.5) / 3.5) * 25
+          : elapsed < 10.0
+            ? 50 + ((elapsed - 6.0) / 4.0) * 25
+            : 75 + Math.min(20, ((elapsed - 10.0) / 4.0) * 20)
+    )
+  );
+
+  return (
+    <div className="active-investigation-container" role="status" aria-live="polite">
+      <div className="active-investigation-header">
+        <div className="investigation-header-main">
+          <span className="investigation-radar-dot" aria-hidden="true" />
+          <div className="investigation-title-group">
+            <h4>Live AI Investigation in Progress</h4>
+            <p>
+              Autonomous reasoning via Meta Muse Spark 1.3
+              {orderRef ? ` · Order ${orderRef}` : ""}
+              {inspectionId ? ` · ${inspectionId.slice(0, 10)}` : ""}
+            </p>
+          </div>
+        </div>
+        <div className="investigation-timer">
+          <Clock3 size={13} aria-hidden="true" />
+          <span>{elapsed.toFixed(1)}s</span>
+        </div>
+      </div>
+
+      <div
+        className="progress-bar"
+        role="progressbar"
+        aria-valuenow={progressPercent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <div
+          className="progress-bar-fill progress-purple"
+          style={{ width: `${progressPercent}%` }}
+        />
+        <div className="progress-bar-shimmer" />
+      </div>
+
+      <div className="investigation-stepper-grid">
+        {stages.map((stage, idx) => {
+          const isDone = idx < currentStageIndex;
+          const isCurrent = idx === currentStageIndex;
+          const isPending = idx > currentStageIndex;
+          const Icon = stage.icon;
+
+          return (
+            <div
+              key={stage.id}
+              className={`investigation-step-node ${isDone ? "is-done" : ""} ${isCurrent ? "is-current" : ""} ${isPending ? "is-pending" : ""}`}
+            >
+              <div className="investigation-node-icon">
+                {isDone ? (
+                  <Check size={14} aria-hidden="true" />
+                ) : isCurrent ? (
+                  <LoaderCircle className="spin" size={14} aria-hidden="true" />
+                ) : (
+                  <Icon size={14} aria-hidden="true" />
+                )}
+              </div>
+              <div className="investigation-node-text">
+                <strong>{stage.label}</strong>
+                <span>{stage.desc}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="analysis-status-message">
+        <Sparkles size={14} aria-hidden="true" />
+        <p>
+          <strong>Stage {currentStageIndex + 1}/4: {currentStage.label}.</strong>{" "}
+          Model is executing read-only tools against local inventory and audit logs. No mutations are performed without supervisor approval.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function InvestigationCard({
   inspection: i,
   order,
@@ -226,6 +366,7 @@ export function InvestigationCard({
         <div>
           <strong>{order?.reference ?? i.order_id}</strong>
           <span>Inspection {i.id.slice(0, 12)}</span>
+          {order?.data_source === "synthetic_claude" && <span>CLAUDE AI SYNTHETIC · fictional inventory · no physical correction verified</span>}
         </div>
         <Badge value={status} />
       </div>
@@ -253,15 +394,19 @@ export function InvestigationCard({
           <strong>{label(result.decision)}</strong>
         </div>
       )}
+      {running && (
+        <ActiveInvestigationProgress
+          orderRef={order?.reference}
+          inspectionId={i.id}
+        />
+      )}
       {summary ? (
         <p className="investigation-summary">{summary}</p>
-      ) : (
+      ) : !running ? (
         <p className="operations-empty-copy">
-          {running
-            ? "Investigation is active. Tool activity appears only after the backend records it."
-            : "Unresolved evidence can be investigated through read-only order, inventory, inspection, pending-action, and history tools. Ambiguous visual evidence remains uncertain."}
+          Unresolved evidence can be investigated through read-only order, inventory, inspection, pending-action, and history tools. Ambiguous visual evidence remains uncertain.
         </p>
-      )}
+      ) : null}
       {i.investigation_id && (
         <dl className="metadata investigation-metadata">
           <div>
@@ -502,6 +647,7 @@ export function CorrectiveActionCard({
               "Order linked through inspection"}{" "}
             · {a.id.slice(0, 10)}
           </span>
+          {order?.data_source === "synthetic_claude" && <span>CLAUDE AI SYNTHETIC · approval pending</span>}
         </div>
         <Badge value={lifecycle} />
       </div>
@@ -673,21 +819,44 @@ export function CorrectiveActionCard({
           <pre>{JSON.stringify(a.execution_details, null, 2)}</pre>
         </details>
       )}
-      {physicalKind && taskId && <div className="action-reinspection">
-        <div>
-          <strong>{physicalKind === "picking" ? "Picking" : "Removal"} task</strong>
-          <p>Recorded physical status: {physicalTask ? label(physicalTask.status) : "Loading"}.
-            Completion is an operator report; a new photo is still required.</p>
+      {physicalKind && taskId && (
+        <div className={`warehouse-task-box ${physicalTask?.status === "OPEN" ? "is-open" : "is-completed"}`}>
+          <div className="task-box-header">
+            <div className="task-box-title">
+              <Package size={16} aria-hidden="true" />
+              <strong>Physical {physicalKind === "picking" ? "Picking" : "Removal"} Task</strong>
+            </div>
+            <span className={`task-tag ${physicalTask?.status === "OPEN" ? "tag-open" : "tag-completed"}`}>
+              {physicalTask ? label(physicalTask.status) : "CHECKING…"}
+            </span>
+          </div>
+          <p style={{ margin: "4px 0 8px 0", fontSize: "11px", color: "var(--foreground-muted)" }}>
+            Physical task status: {physicalTask ? label(physicalTask.status) : "Loading"}.
+            Reporting completion logs physical handling; <strong>a new photo is mandatory</strong> for visual verification.
+          </p>
           {Array.isArray(a.execution_details?.required_product_review_ids) &&
-            a.execution_details.required_product_review_ids.length > 0 && <p>
-              Review required products before replacement: {a.execution_details.required_product_review_ids.join(", ")}.
-              Their absence was not established by the photo.</p>}
-          {physicalTask?.status === "OPEN" && <Button size="sm"
-            disabled={!token || completePhysical.isPending}
-            onClick={() => completePhysical.mutate()}>Report physical completion</Button>}
-          {completePhysical.isError && <p role="alert" className="field-error">{completePhysical.error.message}</p>}
+            a.execution_details.required_product_review_ids.length > 0 && (
+              <p style={{ fontSize: "11px", color: "#fbbf24", margin: "6px 0" }}>
+                Review required products before replacement: {a.execution_details.required_product_review_ids.join(", ")}.
+                Their absence was not established by the photo.
+              </p>
+            )}
+          {physicalTask?.status === "OPEN" && (
+            <Button
+              size="sm"
+              disabled={!token || completePhysical.isPending}
+              onClick={() => completePhysical.mutate()}
+            >
+              {completePhysical.isPending ? "Reporting completion..." : "Report physical task completed"}
+            </Button>
+          )}
+          {completePhysical.isError && (
+            <p role="alert" className="field-error" style={{ marginTop: "6px" }}>
+              {completePhysical.error.message}
+            </p>
+          )}
         </div>
-      </div>}
+      )}
       {["EXECUTED", "AWAITING_REINSPECTION"].includes(lifecycle) ||
       a.status === "EXECUTED" ? (
         <div className="action-reinspection">

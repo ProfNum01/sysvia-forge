@@ -35,9 +35,13 @@ def run_visual_models(image_path: str, products: list[dict], annotation_path: Pa
     except ValueError:
         sam_budget = 0
     budget_exceeded = len(candidates) > sam_budget
-    requests = [(product_id, catalog[product_id]["description"]) for product_id in candidates[:sam_budget]]
+    def sam_phrase(product):
+        description = product["description"]
+        return product["name"].lower() if description.startswith("Claude AI synthetic fixture;") else description
+
+    requests = [(product_id, sam_phrase(catalog[product_id])) for product_id in candidates[:sam_budget]]
     if not requests and products and sam_budget > 0:
-        requests = [(None, products[0]["description"])]
+        requests = [(None, sam_phrase(products[0]))]
 
     async def segment():
         sam_client = create_sam_client(config)

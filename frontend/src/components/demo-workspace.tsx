@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, CircleAlert, Image, LoaderCircle, LockKeyhole, Package, Settings2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { api, label } from "../lib/api";
-import type { DemoAsset, MetaStatus, Order } from "../types";
+import type { DemoAsset, Inspection, MetaStatus, Order } from "../types";
 
 export function DemoWorkspace({ token }: { token: string }) {
   const [selectedId, setSelectedId] = useState("");
@@ -18,6 +18,11 @@ export function DemoWorkspace({ token }: { token: string }) {
   const demoOrders = (orders.data ?? []).filter((order) => ["synthetic_seed", "synthetic_claude", "physical_capture"].includes(order.data_source))
     .sort((a, b) => Number(b.data_source === "synthetic_seed") - Number(a.data_source === "synthetic_seed"));
   const selected = demoOrders.find((order) => order.id === selectedId) ?? demoOrders.find((order) => order.reference === "PS-1001") ?? demoOrders[0];
+  const inspection = useQuery({
+    queryKey: ["inspection", selected?.latest_inspection_id],
+    queryFn: () => api<Inspection>(`/inspections/${selected?.latest_inspection_id}`),
+    enabled: !!token && !!selected?.latest_inspection_id,
+  });
   const blocked = selected?.shipping_status === "SHIPPED";
 
   return <div className="demo-workspace">
@@ -59,6 +64,27 @@ export function DemoWorkspace({ token }: { token: string }) {
             </select>
             {selected && <div className="demo-manifest"><strong>Authoritative manifest · {selected.data_source === "physical_capture" ? "PHYSICAL_CAPTURE" : "SYNTHETIC"}</strong><span>{selected.items.map((item) => `${item.product.sku} × ${item.quantity}`).join(" · ")}</span><span>Shipping: {label(selected.shipping_status ?? "NOT_READY")}</span></div>}
             {selected && (selected.data_source === "physical_capture" || selected.latest_inspection_id) && <Button asChild size="sm" variant="outline"><Link to={selected.latest_inspection_id ? `/inspection?id=${selected.latest_inspection_id}` : `/inspection?order=${selected.id}`}>Open inspection evidence <ArrowRight size={14} aria-hidden="true" /></Link></Button>}
+            {inspection.data && (
+              <div className="demo-recorded-evidence">
+                <strong>Recorded live inference</strong>
+                <div className="demo-live-badges">
+                  <span className="badge">Muse Spark 1.3</span>
+                  <span className="badge">SAM 3.1</span>
+                  {inspection.data.comparison?.some((c) => c.status === "NOT_OBSERVED") && (
+                    <span className="badge">NOT OBSERVED is not confirmed missing</span>
+                  )}
+                  {inspection.data.execution_events?.some((e) => e.details && "tool" in e.details && e.details.tool === "check_inventory") && (
+                    <span className="badge">check_inventory</span>
+                  )}
+                  {inspection.data.investigation_result?.decision && (
+                    <span className="badge">{inspection.data.investigation_result.decision}</span>
+                  )}
+                  {selected?.shipping_status && (
+                    <span className="badge">Shipping {selected.shipping_status}</span>
+                  )}
+                </div>
+              </div>
+            )}
           </div> : <p className="demo-message">No synthetic orders are available in this database.</p>}
       </section>
     )}

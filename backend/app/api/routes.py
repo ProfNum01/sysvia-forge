@@ -94,6 +94,10 @@ def require_current(db, inspection):
     for item in order.items:
         db.refresh(item)
         db.refresh(item.product)
+    if inspection.requirements_revision is None:
+        inspection.requirements_revision = order.requirements_revision
+    if inspection.order_version is None:
+        inspection.order_version = order.version
     if (inspection.requirements_revision != order.requirements_revision
             or inspection.order_version != order.version):
         raise HTTPException(409, "Order requirements changed. Submit new evidence for the current revision.")

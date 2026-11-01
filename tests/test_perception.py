@@ -167,6 +167,14 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertIsNone(result["regions"][0]["product_id"])
         self.assertEqual(result["observations"][0]["identification_status"], "UNIDENTIFIED")
 
+    def test_claude_catalog_uses_concrete_sam_noun_phrase(self):
+        product = {"id": "claude-blue-box", "sku": "BLUE-BOX", "name": "Blue Box",
+                   "description": "Claude AI synthetic fixture; visible label BLUE-BOX"}
+        row = {**observation(), "product_id": product["id"], "label_text": product["sku"]}
+        self.run_pipeline([row], products=[product])
+        calls = [entry for entry in self.timeline if isinstance(entry, tuple) and entry[0] == "actual-sam-call"]
+        self.assertEqual(calls[0][1], "blue box")
+
     def test_failed_muse_does_not_request_sam(self):
         result = self.run_pipeline([], muse_ok=False)
         self.assertIsNone(result["sam"])

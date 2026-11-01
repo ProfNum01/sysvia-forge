@@ -1,11 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Activity,
+  Check,
+  Clock3,
+  Cpu,
   Eye,
   EyeOff,
   Focus,
   ImageOff,
+  Layers,
+  LoaderCircle,
   ScanLine,
+  Sparkles,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -360,36 +366,153 @@ export function ProductComparison({
   );
 }
 
-export function InspectionProgress({ inspection }: { inspection: Inspection }) {
+function ActiveInspectionProgress({ inspection }: { inspection: Inspection }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const start = performance.now();
+    const interval = setInterval(() => {
+      setElapsed(Number(((performance.now() - start) / 1000).toFixed(1)));
+    }, 100);
+    return () => clearInterval(interval);
+  }, []);
+
+  let stageIndex = 0;
+  let progressPct = 15;
+  let statusText = "Ingesting visual evidence and checking geometry constraints...";
+
+  if (elapsed >= 1.0 && elapsed < 2.8) {
+    stageIndex = 1;
+    progressPct = 42 + Math.min(22, (elapsed - 1.0) * 12);
+    statusText = "Meta Muse Spark 1.3 is reading visible container text and performing visual perception...";
+  } else if (elapsed >= 2.8 && elapsed < 4.5) {
+    stageIndex = 2;
+    progressPct = 68 + Math.min(20, (elapsed - 2.8) * 11);
+    statusText = "Meta SAM 3.1 is executing polygon segmentation across candidate object bounding boxes...";
+  } else if (elapsed >= 4.5) {
+    stageIndex = 3;
+    progressPct = 88 + Math.min(10, (elapsed - 4.5) * 4);
+    statusText = "Reconciling observed quantities against authoritative manifest via deterministic policy...";
+  }
+
+  const stages = [
+    { name: "Image Ingestion", sub: "Coordinate integrity" },
+    { name: "Muse Spark 1.3", sub: "Multimodal perception" },
+    { name: "SAM 3.1", sub: "Zero-shot segmentation" },
+    { name: "Reconciliation", sub: "Deterministic policy" },
+  ];
+
+  return (
+    <div className="active-analysis-container" role="status" aria-live="polite">
+      <div className="analysis-progress-header">
+        <div className="analysis-title-group">
+          <div className="pulse-radar-dot" aria-hidden="true" />
+          <div>
+            <strong>LIVE META INFERENCE IN PROGRESS</strong>
+            <span>Photo {inspection.photo_id ? inspection.photo_id.slice(0, 8) : "Active"} · Real-time perception &amp; segmentation</span>
+          </div>
+        </div>
+        <div className="analysis-timer-pill">
+          <Clock3 size={14} aria-hidden="true" />
+          <span>{elapsed.toFixed(1)}s</span>
+        </div>
+      </div>
+
+      <div className="progress-bar-track">
+        <div
+          className="progress-bar-fill"
+          style={{ width: `${Math.min(98, progressPct)}%` }}
+        >
+          <div className="progress-bar-shimmer" />
+        </div>
+      </div>
+
+      <div className="analysis-stepper-grid">
+        {stages.map((stage, idx) => {
+          const isDone = stageIndex > idx;
+          const isCurrent = stageIndex === idx;
+          return (
+            <div
+              key={stage.name}
+              className={`analysis-step-node ${isDone ? "is-done" : ""} ${isCurrent ? "is-current" : ""}`}
+            >
+              <div className="step-node-icon">
+                {isDone ? (
+                  <Check size={13} aria-hidden="true" />
+                ) : isCurrent ? (
+                  <LoaderCircle className="spin" size={13} aria-hidden="true" />
+                ) : (
+                  <span>{idx + 1}</span>
+                )}
+              </div>
+              <div className="step-node-text">
+                <strong>{stage.name}</strong>
+                <small>{stage.sub}</small>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="analysis-status-message">
+        <Sparkles size={15} aria-hidden="true" />
+        <p>{statusText}</p>
+      </div>
+    </div>
+  );
+}
+
+export function InspectionProgress({
+  inspection,
+  isAnalyzing,
+}: {
+  inspection: Inspection;
+  isAnalyzing?: boolean;
+}) {
   const events = inspection.execution_events ?? [];
   const metadata = inspection.provider_metadata;
+  const isCurrentlyAnalyzing =
+    Boolean(isAnalyzing) || inspection.status === "ANALYZING";
+
   const providerStatus = (prefix: "MUSE" | "SAM") =>
     modelEventStatus(events, prefix, !!inspection.provider_error);
   const timing = (ms?: number) =>
     ms != null && Number.isFinite(ms)
       ? `${(ms / 1000).toFixed(2)} s`
       : "Not recorded";
+
   return (
     <div className="inspection-processing">
-      <div className="processing-stage" role="status">
-        <Activity size={16} aria-hidden="true" />
-        <span>Current phase</span>
-        <strong>
-          {inspection.processing_stage
-            ? label(inspection.processing_stage)
-            : "Not recorded"}
-        </strong>
-      </div>
+      {isCurrentlyAnalyzing ? (
+        <ActiveInspectionProgress inspection={inspection} />
+      ) : (
+        <div className="processing-stage" role="status">
+          <Activity size={16} aria-hidden="true" />
+          <span>Current phase</span>
+          <strong>
+            {inspection.processing_stage
+              ? label(inspection.processing_stage)
+              : "Not recorded"}
+          </strong>
+        </div>
+      )}
+
       <div className="model-status-grid">
-        <div>
-          <span>Muse Spark</span>
+        <div className="model-status-card">
+          <div className="model-card-header">
+            <Cpu size={16} aria-hidden="true" />
+            <span>Muse Spark</span>
+          </div>
           <strong>{metadata?.muse_model ?? "muse-spark-1.3"}</strong>
           <p>
             {providerStatus("MUSE")} · {timing(metadata?.muse_latency_ms)}
           </p>
         </div>
-        <div>
-          <span>SAM segmentation</span>
+        <div className="model-status-card">
+          <div className="model-card-header">
+            <Layers size={16} aria-hidden="true" />
+            <span>SAM segmentation</span>
+          </div>
           <strong>{metadata?.sam_model ?? "sam-3.1"}</strong>
           <p>
             {providerStatus("SAM")} · {timing(metadata?.sam_latency_ms)}

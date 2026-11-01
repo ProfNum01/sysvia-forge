@@ -33,13 +33,21 @@ test.describe("SYSVIA ProofSight — Final Release Hardening E2E", () => {
     await page.waitForTimeout(500);
   });
 
-  test("Claude synthetic dataset shows saved image without claiming model results", async ({ page }) => {
+  test("Claude synthetic dataset shows saved live review evidence", async ({ page }) => {
     await page.goto("/demo");
     await page.selectOption("#demo-order", "claude-order-bfba94cb9736d855");
     await expect(page.getByText("CLAUDE AI · SYNTHETIC")).toBeVisible();
     await expect(page.getByText("Claude labeled missing pouch · before")).toBeVisible();
-    await expect(page.getByText("Shipping: Not ready")).toBeVisible();
+    await expect(page.locator(".demo-manifest")).toContainText("Shipping: Held");
     await expect(page.getByRole("link", { name: /Open inspection evidence/ })).toBeVisible();
+    await page.getByRole("link", { name: /Open inspection evidence/ }).click();
+    await expect(page.locator(".comparison-table")).toContainText("BLUE-BOX");
+    await expect(page.locator(".comparison-table")).toContainText("YELLOW-POUCH");
+    await expect(page.locator(".comparison-table")).toContainText("Not Observed");
+    await expect(page.getByLabel("Actual segmentation regions")).toContainText("BLUE-BOX");
+    await page.goto("/operations");
+    await expect(page.locator(".investigation-card").filter({ hasText: "CLAUDE-MISSING-001" })).toContainText("CLAUDE AI SYNTHETIC");
+    await expect(page.locator(".action-card").filter({ hasText: "CLAUDE-MISSING-001" }).filter({ hasText: "Request Reinspection" })).toBeVisible();
   });
 
   test("TASK 1 & 4 — Security Integration & Demo Workspace Reliability", async ({ page, request }) => {
@@ -124,9 +132,6 @@ test.describe("SYSVIA ProofSight — Final Release Hardening E2E", () => {
     await expect(trace).toBeVisible();
     await trace.click();
     await expect(investigationCard).toContainText(/TOOL CALLED|Tool Called|Evidence/i);
-
-    // 7. Verify proposed and executed corrective actions
-    await expect(page.locator(".action-card", { hasText: "Request Reinspection" })).toBeVisible();
 
     // 8. Verify Verification Status and Shipping Safety
     // The order currently requires reinspection, so shipping MUST NOT be authorized
