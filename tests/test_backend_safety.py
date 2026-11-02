@@ -95,6 +95,15 @@ class BackendSafetyTests(unittest.TestCase):
             self.assertEqual(db.scalar(select(func.count()).select_from(Inspection)), 0)
         self.assertFalse((self.settings.data_dir / "uploads").exists())
 
+    def test_same_image_cannot_be_registered_to_different_orders(self):
+        first = self.upload(color="green")
+        self.assertEqual(first.status_code, 201)
+        second = self.client.post("/api/inspections", data={"order_id": "order-1002", "rights_confirmed": "true"},
+                                  files={"image": ("same.png", image_bytes("green"), "image/png")})
+        self.assertEqual(second.status_code, 409)
+        with self.app.state.sessions() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(Inspection)), 1)
+
     def test_protected_image_and_annotation_endpoints_require_real_authorization(self):
         uploaded = self.upload()
         self.assertEqual(uploaded.status_code, 201)

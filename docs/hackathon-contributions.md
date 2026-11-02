@@ -250,3 +250,55 @@
 - Reworked the existing Demo Workspace as a read-only system tour: closed-loop stages, current dashboard counts, recorded order status, and each order's synthetic scene, with links to the operational workspaces.
 - Preserved provenance and evidence boundaries. Live inference badges now require saved completion events; an uploaded inspection alone is not presented as a completed model run. No Meta request or workflow mutation was added to the tour.
 
+
+# 2026-11-01 — Meta budget inspection preflight
+
+- Confirmed the screenshot's uploaded inspection had no inference and the local audit had 89 recorded attempts against the existing 30-request authorization. The server 409 safety gate was correct.
+- Exposed the server's inspection/investigation reservation amounts through the read-only budget endpoint and reused those amounts in its guards. Visual Inspection now preflights that budget, disables paid analysis when insufficient, and shows recorded/authorized/remaining counts. It refreshes budget after an analysis attempt.
+- No authorization increase, Meta call, or fake inference result was made.
+
+
+# 2026-11-01 — Owner-authorized Meta request limit increase
+
+- At the owner's explicit request, increased the cumulative Meta request authorization from 30 to 1000. Existing audit accounting remains intact: 89 recorded attempts, 911 remaining at verification time.
+- Updated the budget regression test to exhaust the new limit and confirmed the server still blocks provider calls after exhaustion. No paid Meta request was made by this change.
+
+
+# 2026-11-01 — Order 06 visual grounding investigation
+
+- Audited the genuine saved Muse/SAM output for TEN-ORDER-06. Muse read all five SKU labels and returned five per-unit scene observations; four SAM regions were recorded for two blue boxes, red can, and yellow pouch. No SAM region was recorded for the green cube.
+- The saved Muse boxes were vertically shifted relative to SAM boxes, yielding IoU 0.42–0.47 against the old 0.50 association threshold. Added a narrow same-column fallback requiring IoU >= 0.40, at least 85% horizontal overlap, at least 60% vertical overlap, and the existing unique-region and matching-candidate checks.
+- Offline replay of saved outputs now matches four units and leaves green uncertain. The original inspection, photo IDs, hold, and review state were not modified. No new Meta request or verification claim was made.
+
+
+# 2026-11-01 - Evidence checklists
+
+- Added per-product checklists to inspection comparison, operational review card, and both before/after photos. A check appears only for a server-confirmed exact quantity match; X means unresolved evidence, not proven absence.
+- Added a focused checklist state test. Frontend build and 30 frontend tests passed. No Meta request was made for this UI change.
+
+
+# 2026-11-02 — Cross-order image reuse guard
+
+- Investigated TEN-ORDER-10's saved inspection and confirmed its uploaded image SHA-256 exactly matches the prior TEN-ORDER-06 inspection, while the visible scene title also says TEN-ORDER-06. This explains the unexpected red can and yellow pouch in order 10; the old records and both photo IDs were preserved.
+- Added a server-side normalized-image hash guard to reject an initial or repeat upload when the same image is already associated with another order. The guard runs before image persistence or model calls and returns HTTP 409. Adjusted existing workflow test fixtures to use different images for distinct orders.
+- The Green Cube remains uncertain in both saved runs: Muse read GREEN-CUBE, but SAM returned zero geometry for that product. No model request or fabricated correction was made.
+
+
+# 2026-11-02 â€” Investigation result presentation
+
+- Added concise Arabic outcomes for persisted investigation decisions. A verified outcome requires VERIFIED inspection status. The full AI summary is available in expandable details.
+- Added decision mapping tests and verified the frontend build. No Meta request was made; inspection and action policy were not changed.
+
+# 2026-11-02 — Docker reference path repair for IMG-ORDER-002
+
+- Investigated saved inspection 60aba0fc-bdb7-4a48-a01b-ec61465e8b0f: Muse completed successfully but returned zero observations, and the one fallback SAM call returned zero regions. The previous inspection also had no confirmed product regions.
+- Confirmed all four registered IMG product reference paths were Windows absolute paths unavailable inside the Linux backend container, despite the reference PNGs being present in the mounted data directory. This prevented reference images and the no-label product hint from reaching Muse.
+- Added constrained mapping from registered Windows data-reference paths to the container's mounted data directory, allowing only known catalog filenames or content-addressed reference names. Verified all four IMG references resolve inside Docker. Existing inspection and photo records were preserved; no Meta request was made.
+
+
+# 2026-11-02 — IMG catalog reference v2 data
+
+- Inspected the four original IMG product references: each was a 520x520 partial-box image with large blank area and a small footer. Created four new isolated full-cube synthetic references with built-in ImageGen, one per color, from the existing local synthetic scene. The new assets are in evaluation/datasets/img-reference-v2; source scene and previous reference files were preserved.
+- Added an idempotent installer that validates the four PNGs, copies them to versioned local data filenames, updates only the four IMG product reference paths/descriptions, and records four audit events. Backed up ignored local SQLite to data/proofsight.pre-img-ref-v2.db first.
+- Confirmed all four references resolve inside Docker, the green reference API returns HTTP 200, and previous inspections are unchanged. This is a data-quality improvement, not a measured live inference gain; no Meta request was made.
+

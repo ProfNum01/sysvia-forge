@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildInspectionUpload,
   canAnalyzeInspection,
+  canStartPaidInspection,
   canReinspectInspection,
   inspectionHref,
   UploadIdempotency,
@@ -89,5 +90,11 @@ describe("inspection backend contract", () => {
     expect(
       canReinspectInspection({ id: "i-1", status: "PROVIDER_ERROR" }, "i-1"),
     ).toBe(true);
+  });
+  it("prevents a paid inspection when the server budget is insufficient or unavailable", () => {
+    expect(canStartPaidInspection({ remaining_requests: 0, inspection_required_requests: 5 })).toBe(false);
+    expect(canStartPaidInspection({ remaining_requests: 4, inspection_required_requests: 5 })).toBe(false);
+    expect(canStartPaidInspection({ remaining_requests: 5, inspection_required_requests: 5 })).toBe(true);
+    expect(canStartPaidInspection(undefined)).toBe(false);
   });
 });

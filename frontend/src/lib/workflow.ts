@@ -56,6 +56,13 @@ export function canAnalyzeInspection(
   );
 }
 
+export function canStartPaidInspection(budget: {
+  remaining_requests: number;
+  inspection_required_requests: number;
+} | undefined): boolean {
+  return !!budget && budget.remaining_requests >= budget.inspection_required_requests;
+}
+
 export function canReinspectInspection(
   inspection: { id: string; status: string },
   latestId?: string | null,

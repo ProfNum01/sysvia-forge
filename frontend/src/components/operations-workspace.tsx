@@ -26,7 +26,9 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "./ui/button";
+import { ProductChecklist } from "./product-checklist";
 import { api, formatTime, label } from "../lib/api";
+import { investigationOutcome } from "../lib/investigation-outcome";
 import {
   actionControls,
   actionImpact,
@@ -451,8 +453,8 @@ export function InvestigationCard({
       showResult({
         type: "INVESTIGATION",
         status: data.investigation_result?.decision ?? "COMPLETED",
-        title: "اكتمل التحقيق الذكي · AI Investigation Completed",
-        subtitle: `تم فحص الأدلة وتطبيق السياسة الحتمية (Order ${order?.reference ?? i.order_id})`,
+        title: investigationOutcome(data.investigation_result?.decision, data.status).title,
+        subtitle: `${investigationOutcome(data.investigation_result?.decision, data.status).subtitle} (${order?.reference ?? i.order_id})`,
         diagnosis:
           data.investigation_result?.summary ??
           data.investigation ??
@@ -1139,6 +1141,11 @@ function OperatorTaskCard({ task, token, remainingRequests }: { task: OperatorTa
   const [showEscalation, setShowEscalation] = useState(false);
   const [escalationReason, setEscalationReason] = useState("");
   const preview = useProtectedImage(`/api/inspections/${task.inspection_id}/image`, token);
+  const originalInspection = useQuery({
+    queryKey: ["inspection", task.inspection_id],
+    queryFn: () => api<Inspection>(`/inspections/${task.inspection_id}`),
+    enabled: !!token,
+  });
   const timeline = useQuery({
     queryKey: ["task-timeline", task.id],
     queryFn: () => api<Audit[]>(`/operational-tasks/${task.id}/timeline`),
@@ -1191,6 +1198,7 @@ function OperatorTaskCard({ task, token, remainingRequests }: { task: OperatorTa
         {preview.url ? <img src={preview.url} alt={`Original inspection for order ${task.order_reference}`} /> :
           <span>{preview.error || "Loading evidence preview…"}</span>}
         <Link to={`/inspection?id=${encodeURIComponent(task.inspection_id)}`}>Review original inspection <ArrowRight size={13} aria-hidden="true" /></Link>
+        {originalInspection.data?.comparison && <ProductChecklist rows={originalInspection.data.comparison} title="Original photo checklist" />}
       </div>
       <div className="operator-task-detail">
         <p><strong>AI recommendation</strong>{task.ai_recommendation}</p>

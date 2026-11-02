@@ -1483,6 +1483,14 @@ td:last-child {
 .operator-task-filters button span { margin-left:5px; font-variant-numeric:tabular-nums; opacity:.8; }
 .operator-task-list { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr)); }
 .operator-task-card { min-width:0; border:1px solid #354967; border-radius:10px; padding:18px; background:linear-gradient(155deg,#17243b,#121b2c); }
+.product-checklist { margin-top: .75rem; padding: .8rem; border: 1px solid #354967; border-radius: 8px; background: #101a2b; color: #e7efff; }
+.product-checklist ul { list-style: none; padding: 0; margin: .55rem 0; }
+.product-checklist li { display: flex; align-items: baseline; gap: .55rem; padding: .3rem 0; }
+.product-checklist li small { display: block; color: #9db7d9; }
+.checklist-mark { display: inline-grid; place-items: center; width: 1.2rem; height: 1.2rem; flex: none; border-radius: 4px; font-weight: 800; }
+.checklist-mark.confirmed { color: #8be4b6; }
+.checklist-mark.unresolved { color: #ffc16d; }
+.product-checklist p { margin: .5rem 0 0; color: #a9bdd9; font-size: .78rem; }
 .operator-task-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
 .operator-task-head h3 { margin:6px 0; font-size:17px; color:#f3f5ff; }
 .operator-task-head small { color:#9eb2d2; overflow-wrap:anywhere; }
@@ -4434,6 +4442,15 @@ td:last-child {
   line-height: 1.6;
   white-space: pre-wrap;
   margin: 0;
+}
+
+.diagnosis-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.diagnosis-details .diagnosis-text {
+  margin-top: 12px;
 }
 
 .modal-table-section {

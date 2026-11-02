@@ -254,6 +254,13 @@ export type MetaStatus = {
   operator_auth_configured: boolean;
   configuration_location?: string;
 };
+export type MetaBudget = {
+  authorized_requests: number;
+  recorded_attempts: number;
+  remaining_requests: number;
+  inspection_required_requests: number;
+  investigation_required_requests: number;
+};
 export type DemoAsset = {
   name: string;
   title: string;

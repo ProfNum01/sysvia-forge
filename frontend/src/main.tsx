@@ -72,6 +72,7 @@ import {
   YAxis,
 } from "recharts";
 import { Button } from "./components/ui/button";
+import { ProductChecklist } from "./components/product-checklist";
 import {
   CorrectiveActionCard,
   InvestigationCard,
@@ -90,6 +91,7 @@ import { validateImage } from "./lib/validation";
 import {
   buildInspectionUpload,
   canAnalyzeInspection,
+  canStartPaidInspection,
   canReinspectInspection,
   inspectionHref,
   UploadIdempotency,
@@ -99,6 +101,7 @@ import type {
   Audit,
   Inspection,
   MetaStatus,
+  MetaBudget,
   Order,
   Product,
   Summary,
@@ -1176,6 +1179,12 @@ function InspectionPage() {
     queryKey: ["products"],
     queryFn: () => api<Product[]>("/products"),
   });
+  const metaBudget = useQuery({
+    queryKey: ["meta-budget"],
+    queryFn: () => api<MetaBudget>("/integrations/meta/budget"),
+    enabled: !!token && !!id,
+    staleTime: 0,
+  });
   useEffect(() => {
     if (!file) {
       setPreview("");
@@ -1264,6 +1273,7 @@ function InspectionPage() {
       setAnalysisRequested(false);
       qc.invalidateQueries({ queryKey: ["inspection", id] });
       qc.invalidateQueries({ queryKey: ["audit"] });
+      qc.invalidateQueries({ queryKey: ["meta-budget"] });
     },
   });
   const current = inspection.data;
@@ -1705,7 +1715,8 @@ function InspectionPage() {
                       disabled={
                         !token ||
                         analyze.isPending ||
-                        !canAnalyzeInspection(current, selected)
+                        !canAnalyzeInspection(current, selected) ||
+                        !canStartPaidInspection(metaBudget.data)
                       }
                     >
                       {analyze.isPending ? (
@@ -1757,6 +1768,14 @@ function InspectionPage() {
                     Explicitly starts paid Meta inference: Muse visual analysis
                     and SAM segmentation limited to visible catalog types.
                   </p>
+                  {metaBudget.data && !canStartPaidInspection(metaBudget.data) && (
+                    <p className="form-hint" role="status">
+                      AI inspection unavailable: {metaBudget.data.recorded_attempts} Meta attempts are recorded against the {metaBudget.data.authorized_requests} authorized requests. This inspection requires capacity for {metaBudget.data.inspection_required_requests} requests; {metaBudget.data.remaining_requests} remain. The image is saved, but no model analysis has run for it.
+                    </p>
+                  )}
+                  {metaBudget.isError && (
+                    <p className="form-hint" role="alert">Meta request budget could not be checked. <button className="text-link" onClick={() => metaBudget.refetch()}>Retry budget check</button>.</p>
+                  )}
                   {current.status === "PROVIDER_ERROR" && (
                     <p className="form-hint">
                       Review the provider error and correct configuration if
@@ -1928,6 +1947,7 @@ function InspectionResults({
             selectedRegionIds={selectedRegionIds}
             onSelectRegions={onSelectRegions}
           />
+          <ProductChecklist rows={i.comparison} title="Inspection checklist" />
         </Panel>
       )}
       {i.annotation_url && !i.regions?.length && (
@@ -2154,6 +2174,7 @@ function VerificationComparison({ inspection }: { inspection: Inspection }) {
                   <ProtectedEvidenceImage path={item.annotation_url ?? item.image_url}
                     alt={`${index === 0 ? "Original" : "New"} inspection evidence`} />
                   <small className="photo-id-tag">Photo ID: {item.photo_id}</small>
+                  {item.comparison && <ProductChecklist rows={item.comparison} title={index === 0 ? "Before photo checklist" : "After photo checklist"} />}
                 </figure>
               ))}
             </div>

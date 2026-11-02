@@ -232,7 +232,7 @@ class ActionEngineTests(unittest.TestCase):
         inspection = self.inspection(certain=False)
         with self.app.state.sessions() as db:
             db.add_all([AuditEvent(event_type="MUSE_ANALYSIS_STARTED", entity_id=inspection["id"],
-                                   actor="meta-provider", details={}) for _ in range(30)])
+                                   actor="meta-provider", details={}) for _ in range(1000)])
             db.commit()
         new_image = io.BytesIO()
         Image.new("RGB", (32, 32), "green").save(new_image, "PNG")
@@ -244,6 +244,8 @@ class ActionEngineTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         provider.assert_not_called()
         self.assertEqual(self.client.get("/api/integrations/meta/budget").json()["remaining_requests"], 0)
+        self.assertEqual(self.client.get("/api/integrations/meta/budget").json()["authorized_requests"], 1000)
+        self.assertEqual(self.client.get("/api/integrations/meta/budget").json()["inspection_required_requests"], 5)
 
     def ready_reinspection_task(self):
         inspection = self.inspection(certain=False)

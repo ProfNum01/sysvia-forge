@@ -26,6 +26,23 @@ def _iou(first: dict, second: dict) -> float:
     return intersection / (first_area + second_area - intersection)
 
 
+def _same_unit_location(source: dict, region: dict) -> bool:
+    """Associate a shifted scene box only when both boxes share the same column.
+
+    Muse can include the label area while SAM returns the package body. A lower
+    IoU is accepted only with strong horizontal alignment and substantial
+    vertical overlap; ambiguous multiple candidates remain rejected by caller.
+    """
+    if _iou(source, region) >= 0.5:
+        return True
+    if _iou(source, region) < 0.4:
+        return False
+    horizontal = max(0.0, min(source["right"], region["right"]) - max(source["left"], region["left"]))
+    vertical = max(0.0, min(source["bottom"], region["bottom"]) - max(source["top"], region["top"]))
+    return (horizontal / min(source["right"] - source["left"], region["right"] - region["left"]) >= 0.85
+            and vertical / min(source["bottom"] - source["top"], region["bottom"] - region["top"]) >= 0.6)
+
+
 def _no_sku_label(product: dict) -> bool:
     """Return True when the product catalog explicitly states no readable SKU label is present."""
     if product.get("no_sku_label"):
@@ -116,7 +133,7 @@ def ground_observations(observations: list[dict], regions: list[dict], products:
         matches = []
         if eligible:
             for region in regions:
-                if region["candidate_product_id"] != product_id or _iou(row["source_box"], region["box"]) < 0.5:
+                if region["candidate_product_id"] != product_id or not _same_unit_location(row["source_box"], region["box"]):
                     continue
                 conflicts = any(other["id"] != region["id"] and other["candidate_product_id"] != product_id
                                 and _iou(region["box"], other["box"]) >= 0.5 for other in regions)
@@ -128,7 +145,7 @@ def ground_observations(observations: list[dict], regions: list[dict], products:
             for region in regions:
                 if region["candidate_product_id"] != product_id:
                     continue
-                if _iou(row["source_box"], region["box"]) < 0.5:
+                if not _same_unit_location(row["source_box"], region["box"]):
                     continue
                 conflicts = any(other["id"] != region["id"] and other["candidate_product_id"] != product_id
                                 and _iou(region["box"], other["box"]) >= 0.5 for other in regions)

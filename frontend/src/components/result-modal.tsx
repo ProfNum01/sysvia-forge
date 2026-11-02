@@ -225,9 +225,9 @@ function ResultModalDialog({
 }) {
   const isVerified = payload.status === "VERIFIED";
   const isNeedsReview =
-    payload.status === "NEEDS_REVIEW" || payload.status === "HELD";
+    payload.status === "NEEDS_REVIEW" || payload.status === "HELD" || payload.status === "HUMAN_REVIEW_REQUIRED";
   const isMismatch =
-    payload.status === "MISMATCH_DETECTED" || payload.status === "FAILED";
+    payload.status === "MISMATCH_DETECTED" || payload.status === "FAILED" || payload.status === "CORRECTIVE_ACTION_REQUIRED";
 
   const statusTone = isVerified
     ? "verified"
@@ -258,7 +258,7 @@ function ResultModalDialog({
               ) : (
                 <ShieldAlert size={16} aria-hidden="true" />
               )}
-              {label(payload.status)}
+              {payload.type === "INVESTIGATION" ? payload.title : label(payload.status)}
             </span>
             <h2 id="result-modal-title">{payload.title}</h2>
             {payload.subtitle && <p className="modal-subtitle">{payload.subtitle}</p>}
@@ -285,7 +285,14 @@ function ResultModalDialog({
                 )}
                 <strong>تشخيص نتيجة الفحص (Outcome Diagnosis)</strong>
               </div>
-              <pre className="diagnosis-text">{payload.diagnosis}</pre>
+              {payload.type === "INVESTIGATION" ? (
+                <details className="diagnosis-details">
+                  <summary>عرض تفاصيل التحقيق والأدلة</summary>
+                  <pre className="diagnosis-text">{payload.diagnosis}</pre>
+                </details>
+              ) : (
+                <pre className="diagnosis-text">{payload.diagnosis}</pre>
+              )}
             </div>
           )}
 

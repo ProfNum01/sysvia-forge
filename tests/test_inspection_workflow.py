@@ -147,7 +147,7 @@ class InspectionWorkflowTests(unittest.TestCase):
             with self.subTest(name=name):
                 # A separate order keeps each failed image independent and current.
                 order = "order-1001" if name == "malformed-observation" else "order-1002"
-                inspection = self.upload(order=order).json()
+                inspection = self.upload(order=order, color="blue" if order == "order-1002" else "white").json()
                 response = self.analyze(inspection["id"], result)
                 self.assertEqual(response.status_code, 502)
                 saved = self.client.get(f"/api/inspections/{inspection['id']}").json()
@@ -328,7 +328,7 @@ class InspectionWorkflowTests(unittest.TestCase):
                             else:
                                 line.product_id, line.quantity = "product-blue", 1
                         db.commit()
-                inspection = self.upload(order=order).json()
+                inspection = self.upload(order=order, color="blue" if order == "order-1002" else "white").json()
                 response = self.analyze(inspection["id"], result)
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.json()["status"], "NEEDS_REVIEW")
@@ -372,7 +372,8 @@ class InspectionWorkflowTests(unittest.TestCase):
     def test_provider_auth_and_rate_limit_errors_are_persisted_without_fake_sam_events(self):
         for status, category, retryable in ((401, "authentication", False), (429, "rate_limit", True)):
             with self.subTest(status=status):
-                inspection = self.upload(order="order-1001" if status == 401 else "order-1002").json()
+                inspection = self.upload(order="order-1001" if status == 401 else "order-1002",
+                                         color="white" if status == 401 else "blue").json()
 
                 def failed_provider(_path, _catalog, _annotation, on_event=None):
                     on_event("MUSE_ANALYSIS_STARTED", {"model": "muse-spark-1.3"})

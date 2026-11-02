@@ -248,6 +248,9 @@ def create_inspection(request, db, order_id, image, rights_confirmed, parent=Non
                     or existing.previous_inspection_id != (parent.id if parent else None)):
                 raise HTTPException(409, "This idempotency key belongs to different inspection evidence.")
             return inspection_out(existing)
+    if db.scalar(select(Inspection.id).where(
+            Inspection.image_sha256 == digest, Inspection.order_id != order_id).limit(1)):
+        raise HTTPException(409, "This image is already associated with another order. Use evidence for the selected order.")
     order = required(db, Order, order_id)
     if order.shipping_status == "SHIPPED":
         raise HTTPException(409, "A shipped order cannot accept replacement inspection evidence.")
@@ -463,7 +466,8 @@ def analyze(request: Request, inspection_id: str, actor=Depends(supervisor), db=
     with request.app.state.mutations:
         inspection = required(db, Inspection, inspection_id)
         order = require_current(db, inspection)
-        if meta_request_budget(db)["remaining_requests"] < 5:
+        budget = meta_request_budget(db)
+        if budget["remaining_requests"] < budget["inspection_required_requests"]:
             raise HTTPException(409, "Cumulative Meta request authorization is exhausted or insufficient for this inspection.")
         quality = (inspection.provider_metadata or {}).get("image_quality", {})
         if (request.app.state.settings.quality_gate_enabled
@@ -705,7 +709,8 @@ def investigate(request: Request, inspection_id: str,
                 raise HTTPException(409, "This investigation idempotency key belongs to another inspection.")
         if inspection.investigation_status in {"RUNNING", "COMPLETED"}:
             return inspection_out(inspection)
-        if meta_request_budget(db)["remaining_requests"] < 7:
+        budget = meta_request_budget(db)
+        if budget["remaining_requests"] < budget["investigation_required_requests"]:
             raise HTTPException(409, "Cumulative Meta request authorization is exhausted or insufficient for investigation.")
         attempt = timestamp()
         changed = db.execute(update(Inspection).where(Inspection.id == inspection.id,

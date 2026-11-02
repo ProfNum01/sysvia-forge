@@ -63,6 +63,21 @@ class GroundingTests(unittest.TestCase):
         self.assertEqual([row["identification_status"] for row in result], ["MATCHED", "MATCHED"])
         self.assertEqual([row["evidence_region_ids"] for row in result], [["region-p1-0"], ["region-p1-1"]])
 
+    def test_shifted_label_box_matches_only_unique_product_region(self):
+        source = {"left": 114, "top": 240, "right": 313, "bottom": 446}
+        sam = {"left": 116, "top": 185, "right": 311, "bottom": 365}
+        other = {"left": 366, "top": 185, "right": 561, "bottom": 365}
+        regions = build_regions([("p1", segmentation([{"object_id": "0", **sam}, {"object_id": "1", **other}]))])
+        result = ground_observations([observation(box=source)], regions, CATALOG)
+        self.assertEqual(result[0]["identification_status"], "MATCHED")
+        self.assertEqual(result[0]["evidence_region_ids"], ["region-p1-0"])
+
+    def test_shifted_box_does_not_match_weak_or_ambiguous_overlap(self):
+        source = {"left": 114, "top": 240, "right": 313, "bottom": 446}
+        weak = {"left": 190, "top": 185, "right": 385, "bottom": 365}
+        regions = build_regions([("p1", segmentation([{"object_id": "0", **weak}]))])
+        self.assertEqual(ground_observations([observation(box=source)], regions, CATALOG)[0]["identification_status"], "UNCERTAIN")
+
     def test_duplicate_model_claims_cannot_count_one_region_twice(self):
         regions = build_regions([("p1", segmentation())])
         result = ground_observations([observation(), observation()], regions, CATALOG)

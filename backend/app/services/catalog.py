@@ -1,5 +1,6 @@
 """Explicit SKU mappings for original synthetic references, not warehouse identity claims."""
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+import re
 from PIL import Image, ImageDraw, ImageFont
 
 REFERENCE_CATALOG = {
@@ -7,15 +8,44 @@ REFERENCE_CATALOG = {
     "product-blue": {"sku": "PS-BLUE-02", "color": "#215fcc", "shape": "box"},
     "product-amber": {"sku": "PS-AMBER-03", "color": "#bf7f21", "shape": "bottle"},
     "product-green": {"sku": "PS-GREEN-04", "color": "#238355", "shape": "pouch"},
+    # Image-manifest box products — reference images cropped from real photo
+    "img-yellow-box": {"sku": "IMG-YELLOW-BOX", "color": "#f5c518", "shape": "box", "no_sku_label": True},
+    "img-red-box":    {"sku": "IMG-RED-BOX",    "color": "#e63232", "shape": "box", "no_sku_label": True},
+    "img-blue-box":   {"sku": "IMG-BLUE-BOX",   "color": "#2563eb", "shape": "box", "no_sku_label": True},
+    "img-green-box":  {"sku": "IMG-GREEN-BOX",  "color": "#16a34a", "shape": "box", "no_sku_label": True},
 }
 
 
 def reference_path(data_dir, product_id, sku, registered_reference_path=None):
     if registered_reference_path:
         candidate = Path(registered_reference_path).resolve()
-        roots = ((Path(data_dir) / "physical_references").resolve(),
-                 (Path(data_dir) / "synthetic_references").resolve())
-        return candidate if any(candidate.is_relative_to(root) for root in roots) and candidate.is_file() else None
+        roots = (
+            (Path(data_dir) / "physical_references").resolve(),
+            (Path(data_dir) / "synthetic_references").resolve(),
+            # Allow references/ for catalog-registered real-photo crops
+            (Path(data_dir) / "references").resolve(),
+        )
+        if any(candidate.is_relative_to(root) for root in roots) and candidate.is_file():
+            return candidate
+        # The local SQLite database is shared by Windows and Docker. Resolve
+        # only a known catalog filename or a content-addressed reference from
+        # a Windows /data subdirectory into the container's mounted data root.
+        windows = PureWindowsPath(registered_reference_path)
+        parts = windows.parts
+        if len(parts) >= 3 and parts[-3].lower() == "data":
+            folder, filename = parts[-2], parts[-1]
+            if folder == "references":
+                known = REFERENCE_CATALOG.get(product_id)
+                allowed = known is not None and known["sku"] == sku and filename in {
+                    f"{product_id}.png", f"{product_id}-v2.png"}
+            else:
+                allowed = folder in {"physical_references", "synthetic_references"} and bool(
+                    re.fullmatch(r"[0-9a-f]{64}\.png", filename))
+            if allowed:
+                mapped = (Path(data_dir) / folder / filename).resolve()
+                if mapped.is_relative_to((Path(data_dir) / folder).resolve()) and mapped.is_file():
+                    return mapped
+        return None
     item = REFERENCE_CATALOG.get(product_id)
     if not item or item["sku"] != sku:
         return None
