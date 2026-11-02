@@ -84,6 +84,7 @@ import {
   ProductComparison,
 } from "./components/inspection-evidence";
 import { DemoWorkspace } from "./components/demo-workspace";
+import { CreateTestOrder } from "./components/create-test-order";
 import { ResultModalProvider, useResultModal } from "./components/result-modal";
 import { api, formatTime, label, setApiOperatorToken } from "./lib/api";
 import { useProtectedImage } from "./lib/protected-image";
@@ -745,6 +746,8 @@ function NoTokenState() {
 }
 function Orders() {
   const { token } = useContext(TokenContext);
+  const qc = useQueryClient();
+  const [showCreator, setShowCreator] = useState(false);
   const [orderParams] = useSearchParams();
   const q = useQuery({
     queryKey: ["orders"],
@@ -778,13 +781,14 @@ function Orders() {
         description="Define what should be there before checking what actually is."
         accent="teal"
         badge="AUTHORITATIVE MANIFESTS"
-        action={
-          <span className="synthetic-label">
-            <Database size={14} aria-hidden="true" />
-            Synthetic seed data
-          </span>
-        }
+        action={<button type="button" className="create-test-toggle" disabled={!token}
+          aria-expanded={showCreator} onClick={() => setShowCreator((value) => !value)}>
+          {showCreator ? "Close test order" : "+ Create test order"}
+        </button>}
       />
+      {showCreator && <Panel title="Create a test order" subtitle="Add a reference image and expected quantity for each product.">
+        <CreateTestOrder onCreated={(order) => { setSelected(order.id); setSearch(""); setStatusFilter("ALL"); qc.invalidateQueries({ queryKey: ["orders"] }); }} />
+      </Panel>}
       <div className="orders-filter-bar" role="toolbar" aria-label="Filter orders by verification status">
         {[
           { key: "ALL", label: "All Orders", icon: Layers, count: rows.length },

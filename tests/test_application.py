@@ -84,7 +84,8 @@ class ApplicationTests(unittest.TestCase):
         for row in assets.json():
             self.assertIn(row["provenance"], {"original_synthetic_fixture", "synthetic_packing", "synthetic_claude"})
             self.assertEqual(row["provenance"] == "synthetic_packing", row["name"].startswith("packing-"))
-            self.assertEqual(row["provenance"] == "synthetic_claude", row["name"].startswith("claude-"))
+            self.assertEqual(row["provenance"] == "synthetic_claude",
+                             row["name"].startswith(("claude-", "ten-order-")))
             image = self.client.get(row["url"])
             self.assertEqual(image.status_code, 200)
             self.assertTrue(image.content.startswith(b"\x89PNG"))

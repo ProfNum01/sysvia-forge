@@ -24,6 +24,7 @@ def reference_path(data_dir, product_id, sku, registered_reference_path=None):
             (Path(data_dir) / "synthetic_references").resolve(),
             # Allow references/ for catalog-registered real-photo crops
             (Path(data_dir) / "references").resolve(),
+            (Path(data_dir) / "user_references").resolve(),
         )
         if any(candidate.is_relative_to(root) for root in roots) and candidate.is_file():
             return candidate
@@ -39,7 +40,7 @@ def reference_path(data_dir, product_id, sku, registered_reference_path=None):
                 allowed = known is not None and known["sku"] == sku and filename in {
                     f"{product_id}.png", f"{product_id}-v2.png"}
             else:
-                allowed = folder in {"physical_references", "synthetic_references"} and bool(
+                allowed = folder in {"physical_references", "synthetic_references", "user_references"} and bool(
                     re.fullmatch(r"[0-9a-f]{64}\.png", filename))
             if allowed:
                 mapped = (Path(data_dir) / folder / filename).resolve()

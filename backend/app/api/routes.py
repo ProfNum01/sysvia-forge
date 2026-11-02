@@ -11,7 +11,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
 from sqlalchemy import func, select, update
@@ -20,7 +20,7 @@ from sqlalchemy.orm import object_session
 from pydantic import ValidationError
 
 from backend.app.models.database import (Approval, AuditEvent, CorrectiveAction, Discrepancy, Inspection,
-    InspectionObservation, Inventory, Order, PickingTask, RemovalTask, OperationalTask, TaskTransition, Product, audit, identifier, timestamp)
+    InspectionObservation, Inventory, Order, OrderItem, PickingTask, RemovalTask, OperationalTask, TaskTransition, Product, audit, identifier, timestamp)
 from backend.app.core.config import ROOT
 from backend.app.schemas.responses import (ActionOut, OperationalTaskOut, TaskQueueOut, TaskAssignmentRequest, TaskEscalationRequest, AuditOut, DashboardOut, HealthOut, IdempotentRequest,
     EvidenceRegion, InspectionOut, MetaStatusOut, ObservationInput, OrderOut, ProductOut, RejectionRequest, ShippingRequest)
@@ -168,6 +168,96 @@ def product_reference(request: Request, product_id: str, actor=Depends(superviso
     if path is None or not path.is_file():
         raise HTTPException(404, "A rights-cleared product reference is not available.")
     return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@router.post("/orders/test", response_model=OrderOut, status_code=201)
+def create_test_order(request: Request, response: Response, manifest: Annotated[str, Form()],
+                      rights_confirmed: Annotated[bool, Form()],
+                      references: Annotated[list[UploadFile], File()],
+                      idempotency_key: Annotated[str | None, Header()] = None,
+                      actor=Depends(supervisor), db=Depends(database)):
+    if not rights_confirmed:
+        raise HTTPException(422, "Confirm that every reference image is synthetic or rights-cleared.")
+    if not idempotency_key or not re.fullmatch(r"[a-zA-Z0-9_-]{8,100}", idempotency_key):
+        raise HTTPException(422, "Idempotency-Key must be 8–100 letters, digits, underscores, or hyphens.")
+    try:
+        body = json.loads(manifest)
+    except (TypeError, ValueError):
+        raise HTTPException(422, "Manifest must be valid JSON.") from None
+    if not isinstance(body, dict) or set(body) != {"reference", "customer", "items"}:
+        raise HTTPException(422, "Manifest requires reference, customer, and items.")
+    order_reference, customer, lines = body["reference"], body["customer"], body["items"]
+    if (not isinstance(order_reference, str) or not re.fullmatch(r"[A-Za-z0-9_-]{3,60}", order_reference)
+            or not isinstance(customer, str) or not 1 <= len(customer.strip()) <= 100
+            or not isinstance(lines, list) or not 1 <= len(lines) <= 4 or len(references) != len(lines)):
+        raise HTTPException(422, "Enter a valid order reference, customer, and 1–4 items with one image each.")
+    skus = set()
+    for line in lines:
+        if not isinstance(line, dict) or not {"sku", "name", "color", "quantity"}.issubset(line) or set(line) - {"sku", "name", "color", "quantity", "visible_label"}:
+            raise HTTPException(422, "Each item needs SKU, name, color, quantity, and optional visible_label.")
+        sku, name, color, quantity = line["sku"], line["name"], line["color"], line["quantity"]
+        if (not isinstance(sku, str) or not re.fullmatch(r"[A-Za-z0-9_-]{2,60}", sku)
+                or sku in skus or not isinstance(name, str) or not 1 <= len(name.strip()) <= 100
+                or not isinstance(color, str) or not 1 <= len(color.strip()) <= 40
+                or type(quantity) is not int or not 1 <= quantity <= 100
+                or type(line.get("visible_label", False)) is not bool):
+            raise HTTPException(422, "Item fields or quantities are invalid, or SKUs are duplicated.")
+        skus.add(sku)
+    prepared = [prepare_image(upload, request.app.state.settings) for upload in references]
+    fingerprint = hashlib.sha256(json.dumps({"manifest": body, "images": [row[1] for row in prepared]},
+                                         sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    order_id = "user-order-" + hashlib.sha256(idempotency_key.encode()).hexdigest()[:24]
+    with request.app.state.mutations:
+        existing = db.get(Order, order_id)
+        if existing:
+            event = db.scalar(select(AuditEvent).where(AuditEvent.entity_id == order_id,
+                AuditEvent.event_type == "TEST_ORDER_CREATED"))
+            if not event or event.details.get("fingerprint") != fingerprint:
+                raise HTTPException(409, "This idempotency key belongs to a different test order.")
+            response.status_code = 200
+            return existing
+        if db.scalar(select(Order.id).where(Order.reference == order_reference)):
+            raise HTTPException(409, "Order reference already exists.")
+        if db.scalar(select(Product.id).where(Product.sku.in_(skus))):
+            raise HTTPException(409, "One or more SKUs already exist.")
+        folder = request.app.state.settings.data_dir / "user_references"
+        created_files = []
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            order = Order(id=order_id, reference=order_reference, customer=customer.strip(),
+                          data_source="synthetic_user", status="PENDING_INSPECTION",
+                          preparation_status="READY_FOR_INSPECTION", shipping_status="NOT_READY")
+            db.add(order)
+            for index, (line, prepared_image) in enumerate(zip(lines, prepared)):
+                _, digest, _, content, _, _ = prepared_image
+                destination = folder / f"{digest}.png"
+                if not destination.exists():
+                    destination.write_bytes(content)
+                    created_files.append(destination)
+                product_id = f"{order_id}-product-{index + 1}"
+                db.add(Product(id=product_id, sku=line["sku"], name=line["name"].strip(),
+                    color=line["color"].strip(),
+                    description=f"Operator-provided test reference for {line['name'].strip()}; "
+                                + ("exact readable SKU label expected" if line.get("visible_label") else "no visible sku label"),
+                    registered_reference_path=str(destination), reference_provenance="operator_rights_confirmed",
+                    visible_label=line["sku"] if line.get("visible_label") else "NONE"))
+                db.add(OrderItem(id=f"{order_id}-item-{index + 1}", order_id=order_id,
+                                 product_id=product_id, quantity=line["quantity"]))
+            audit(db, "TEST_ORDER_CREATED", order_id,
+                  {"fingerprint": fingerprint, "reference": order_reference,
+                   "item_count": len(lines), "image_sha256": [row[1] for row in prepared]}, actor=actor)
+            db.commit()
+            return db.get(Order, order_id)
+        except IntegrityError:
+            db.rollback()
+            for path in created_files:
+                path.unlink(missing_ok=True)
+            raise HTTPException(409, "Order reference or SKU already exists.") from None
+        except Exception:
+            db.rollback()
+            for path in created_files:
+                path.unlink(missing_ok=True)
+            raise
 
 
 @router.get("/orders/{order_id}", response_model=OrderOut)
@@ -495,13 +585,15 @@ def analyze(request: Request, inspection_id: str, actor=Depends(supervisor), db=
         catalog_prefix = ("claude-" if order.data_source == "synthetic_claude" else
                           "physical-" if order.data_source == "physical_capture" else
                           "packing-" if order.id.startswith("order-packing-") else "product-")
+        catalog_rows = ([item.product for item in order.items] if order.data_source == "synthetic_user" else
+                        list(db.scalars(select(Product).where(Product.id.like(f"{catalog_prefix}%")).order_by(Product.id).limit(4))))
         products = [{"id": p.id, "sku": p.sku, "name": p.name, "color": p.color, "description": p.description,
                      "no_sku_label": (p.visible_label == "NONE" or "no visible sku label" in p.description.lower()),
                      "reference_image_path": str(reference_path(request.app.state.settings.data_dir, p.id, p.sku,
                                                                   p.registered_reference_path))
                          if reference_path(request.app.state.settings.data_dir, p.id, p.sku,
                                            p.registered_reference_path) else None}
-                    for p in db.scalars(select(Product).where(Product.id.like(f"{catalog_prefix}%")).order_by(Product.id).limit(4))]
+                    for p in catalog_rows]
     allowed_events = {"MUSE_ANALYSIS_STARTED", "MUSE_ANALYSIS_COMPLETED",
                       "SAM_SEGMENTATION_STARTED", "SAM_SEGMENTATION_COMPLETED"}
 

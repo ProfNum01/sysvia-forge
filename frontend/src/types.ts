@@ -5,7 +5,7 @@ export type Product = {
   color?: string;
   description?: string;
   reference_image_url?: string | null;
-  reference_source?: "original_synthetic_reference" | "PHYSICAL_CAPTURE" | null;
+  reference_source?: "original_synthetic_reference" | "PHYSICAL_CAPTURE" | "operator_rights_confirmed" | null;
   visible_label?: string | null;
   barcode?: string | null;
 };

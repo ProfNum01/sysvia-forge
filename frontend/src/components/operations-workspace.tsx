@@ -29,6 +29,7 @@ import { Button } from "./ui/button";
 import { ProductChecklist } from "./product-checklist";
 import { api, formatTime, label } from "../lib/api";
 import { investigationOutcome } from "../lib/investigation-outcome";
+import { actionButtonLabel, investigationNextStep, sortOperationalRecords } from "../lib/operations-presentation";
 import {
   actionControls,
   actionImpact,
@@ -81,14 +82,16 @@ function Surface({
   subtitle,
   children,
   action,
+  className = "",
 }: {
   title: string;
   subtitle: string;
   children: React.ReactNode;
   action?: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <section className="panel">
+    <section className={`panel ${className}`}>
       <div className="panel-heading">
         <div>
           <h2>{title}</h2>
@@ -478,6 +481,13 @@ export function InvestigationCard({
   const running = status === "RUNNING" || inFlight;
   const result = i.investigation_result;
   const summary = result?.summary ?? i.investigation;
+  const nextStep = investigationNextStep(result?.decision, i.status);
+  const linkedAction = i.actions.find((action) => actionControls(action).approve || actionControls(action).execute)
+    ?? i.actions.find((action) => action.status === "EXECUTED");
+  const nextHref = nextStep.target === "action" && linkedAction
+    ? `/operations?action=${encodeURIComponent(linkedAction.id)}#action-${encodeURIComponent(linkedAction.id)}`
+    : nextStep.target === "task" ? "#operator-tasks"
+    : `/inspection?id=${encodeURIComponent(i.id)}`;
   const events = operationEvents(i.execution_events ?? []);
   const eligible =
     isCurrent &&
@@ -556,6 +566,13 @@ export function InvestigationCard({
           Unresolved evidence can be investigated through read-only order, inventory, inspection, pending-action, and history tools. Ambiguous visual evidence remains uncertain.
         </p>
       ) : null}
+      <div className="investigation-next-step">
+        <strong>{nextStep.label}</strong>
+        <p>{nextStep.explanation}</p>
+        <Link to={nextHref}>{nextStep.target === "action" && !linkedAction ? "View evidence" : nextStep.label} <ArrowRight size={13} aria-hidden="true" /></Link>
+      </div>
+      <details className="investigation-more">
+        <summary>Findings, evidence links, and investigation record</summary>
       {i.investigation_id && (
         <dl className="metadata investigation-metadata">
           <div>
@@ -621,6 +638,7 @@ export function InvestigationCard({
           />
         </div>
       )}
+      </details>
       {result?.verification_required && (
         <div className="inline-note">
           <ShieldCheck size={16} aria-hidden="true" />
@@ -811,7 +829,7 @@ export function CorrectiveActionCard({
               "Order linked through inspection"}{" "}
             · {a.id.slice(0, 10)}
           </span>
-          {order?.data_source === "synthetic_claude" && <span>CLAUDE AI SYNTHETIC · approval pending</span>}
+          {order?.data_source === "synthetic_claude" && <span>CLAUDE AI SYNTHETIC · fictional inventory</span>}
         </div>
         <Badge value={lifecycle} />
       </div>
@@ -820,6 +838,9 @@ export function CorrectiveActionCard({
           Recorded action status: {label(a.status)}
         </p>
       )}
+      <p className="action-summary-line">{a.proposal && typeof a.proposal === "string" ? a.proposal : actionImpact(a.type)}</p>
+      <details className="action-more">
+        <summary>Why this action? Review evidence and impact</summary>
       <div className="action-problem">
         <span>Operational issue</span>
         {related.length ? (
@@ -861,6 +882,7 @@ export function CorrectiveActionCard({
           orderId={a.order_id ?? order?.id}
         />
       )}
+      </details>
       <div className="button-row">
         {controls.approve && (
           <Button
@@ -870,7 +892,7 @@ export function CorrectiveActionCard({
             onClick={() => mutation.mutate("approve")}
           >
             <ShieldCheck size={15} aria-hidden="true" />
-            Approve
+            {actionButtonLabel(a.type, "approve")}
           </Button>
         )}
         {controls.reject && (
@@ -892,7 +914,7 @@ export function CorrectiveActionCard({
             onClick={() => mutation.mutate("execute")}
           >
             <Play size={14} aria-hidden="true" />
-            Execute approved action
+            {actionButtonLabel(a.type, "execute")}
           </Button>
         )}
         {inFlight && (
@@ -1193,6 +1215,7 @@ function OperatorTaskCard({ task, token, remainingRequests }: { task: OperatorTa
       </div>
       <Badge value={task.status} />
     </div>
+    <details className="operator-task-details"><summary>Evidence, recommendation, and instructions</summary>
     <div className="operator-task-body">
       <div className="operator-task-preview">
         {preview.url ? <img src={preview.url} alt={`Original inspection for order ${task.order_reference}`} /> :
@@ -1209,6 +1232,7 @@ function OperatorTaskCard({ task, token, remainingRequests }: { task: OperatorTa
         {task.approval_required && <p className="operator-task-approval">Supervisor approval is required for the underlying action.</p>}
       </div>
     </div>
+    </details>
     <div className="operator-task-controls">
       {next && <Button size="sm" variant="primary" disabled={!token || transition.isPending}
         onClick={() => transition.mutate(next[0])}>{next[1]}</Button>}
@@ -1216,9 +1240,11 @@ function OperatorTaskCard({ task, token, remainingRequests }: { task: OperatorTa
         <Button size="sm" variant="warning" disabled={!token || transition.isPending}
           onClick={() => setShowEscalation(!showEscalation)}>Escalate</Button>}
       {["PENDING_APPROVAL", "APPROVED"].includes(task.status) &&
-        <Button asChild size="sm" variant="outline"><Link to={`/operations?action=${encodeURIComponent(task.action_id)}#action-${encodeURIComponent(task.action_id)}`}>Review approval action</Link></Button>}
+        <Button asChild size="sm" variant="outline"><Link to={`/operations?action=${encodeURIComponent(task.action_id)}#action-${encodeURIComponent(task.action_id)}`}
+          onClick={() => document.getElementById(`action-${task.action_id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}>Review approval action</Link></Button>}
       {task.type === "PROPOSE_CORRECTIVE_PICK" && task.status === "IN_PROGRESS" &&
-        <Button asChild size="sm" variant="outline"><Link to={`/operations?action=${encodeURIComponent(task.action_id)}#action-${encodeURIComponent(task.action_id)}`}>Report picking work</Link></Button>}
+        <Button asChild size="sm" variant="outline"><Link to={`/operations?action=${encodeURIComponent(task.action_id)}#action-${encodeURIComponent(task.action_id)}`}
+          onClick={() => document.getElementById(`action-${task.action_id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}>Report picking work</Link></Button>}
       {task.evidence_inspection_id && <Button asChild size="sm" variant="outline"><Link to={`/inspection?id=${encodeURIComponent(task.evidence_inspection_id)}`}>Review submitted evidence</Link></Button>}
       {task.status === "EVIDENCE_SUBMITTED" && <Button size="sm" variant="inspect"
         disabled={!token || remainingRequests < 5 || analyzeEvidence.isPending}
@@ -1252,8 +1278,11 @@ function OperatorTaskCard({ task, token, remainingRequests }: { task: OperatorTa
 export function OperationsWorkspace({ token }: { token: string }) {
   const [params] = useSearchParams();
   const selectedAction = params.get("action");
-  const [filter, setFilter] = useState("ALL");
+  const [filter, setFilter] = useState("ATTENTION");
   const [taskFilter, setTaskFilter] = useState<TaskView>("ALL");
+  const [showAllTasks, setShowAllTasks] = useState(false);
+  const [showAllResults, setShowAllResults] = useState(false);
+  const [showAllActions, setShowAllActions] = useState(false);
   const activeRequests =
     useIsMutating({ mutationKey: ["investigate"] }) +
     useIsMutating({ mutationKey: ["action"] });
@@ -1282,7 +1311,10 @@ export function OperationsWorkspace({ token }: { token: string }) {
     api<{ remaining_requests: number; recorded_attempts: number; authorized_requests: number }>("/integrations/meta/budget"),
     enabled: !!token });
   const visibleTasks = (taskQuery.data ?? []).filter((task) =>
-    taskFilter === "ALL" || taskView(task.status) === taskFilter);
+    taskFilter === "ALL" || taskView(task.status) === taskFilter).sort((a, b) => {
+      const priority = (status: string) => status === "PENDING_APPROVAL" ? 0 : status === "EVIDENCE_REQUIRED" ? 1 : status === "OPEN" ? 2 : 3;
+      return priority(a.status) - priority(b.status) || b.updated_at.localeCompare(a.updated_at);
+    });
   const running =
     q.data?.some((i) => i.investigation_status === "RUNNING") ?? false;
   const audit = useQuery({
@@ -1291,17 +1323,24 @@ export function OperationsWorkspace({ token }: { token: string }) {
     refetchInterval: running || activeRequests > 0 ? 1500 : false,
   });
   const inspections = q.data ?? [];
-  const allActions = inspections.flatMap((i) =>
-    i.actions.map((action) => ({ action, inspection: i })),
-  );
+  const orderById = new Map((orders.data ?? []).map((order) => [order.id, order]));
+  const currentIds = new Set((orders.data ?? []).map((order) => order.latest_inspection_id).filter(Boolean));
+  const allActions = sortOperationalRecords(inspections.flatMap((i) =>
+    i.actions.map((action) => ({ action, inspection: i, created_at: i.created_at,
+      current: currentIds.has(i.id), actionable: currentIds.has(i.id) &&
+        (actionControls(action).approve || actionControls(action).execute) })),
+  ));
   const actions = allActions.filter(
     ({ action }) =>
-      (!selectedAction || action.id === selectedAction) &&
+      (selectedAction ? action.id === selectedAction :
       (filter === "ALL" ||
+        (filter === "ATTENTION" && currentIds.has(action.inspection_id) &&
+          (actionControls(action).approve || actionControls(action).execute)) ||
+        (filter === "FOLLOWUP" && currentIds.has(action.inspection_id) && action.lifecycle_state === "AWAITING_REINSPECTION") ||
         (filter === "REVIEW" && actionControls(action).approve) ||
         (filter === "APPROVED" && action.status === "APPROVED") ||
         (filter === "EXECUTED" && action.status === "EXECUTED") ||
-        (filter === "REJECTED" && action.status === "REJECTED")),
+        (filter === "REJECTED" && action.status === "REJECTED"))),
   );
   const investigations = inspections.filter(
     (i) =>
@@ -1312,9 +1351,20 @@ export function OperationsWorkspace({ token }: { token: string }) {
         i.discrepancies.length > 0 &&
         orders.data?.find((o) => o.id === i.order_id)?.latest_inspection_id ===
         i.id),
-  );
+  ).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const currentInvestigations = investigations.filter((i) => currentIds.has(i.id));
+  const historicalInvestigations = investigations.filter((i) => !currentIds.has(i.id));
+  const displayedTasks = showAllTasks ? visibleTasks : visibleTasks.slice(0, 6);
+  const displayedResults = showAllResults ? currentInvestigations : currentInvestigations.slice(0, 6);
+  const displayedActions = selectedAction || showAllActions ? actions : actions.slice(0, 6);
+  useEffect(() => {
+    if (!selectedAction || q.isPending || orders.isPending) return;
+    const frame = requestAnimationFrame(() => document.getElementById(`action-${selectedAction}`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    return () => cancelAnimationFrame(frame);
+  }, [selectedAction, q.isPending, orders.isPending, actions.length]);
   return (
     <>
+      <div className="operations-layout">
       <div className="operations-summary">
         {[
           {
@@ -1326,20 +1376,20 @@ export function OperationsWorkspace({ token }: { token: string }) {
           {
             label: "Awaiting approval",
             count: allActions.filter(
-              ({ action }) => actionControls(action).approve,
+              ({ action }) => currentIds.has(action.inspection_id) && actionControls(action).approve,
             ).length,
           },
           {
             label: "Approved actions",
             count: allActions.filter(
-              ({ action }) => action.status === "APPROVED",
+              ({ action }) => currentIds.has(action.inspection_id) && action.status === "APPROVED",
             ).length,
           },
           {
             label: "Awaiting reinspection",
             count: allActions.filter(
               ({ action }) =>
-                action.lifecycle_state === "AWAITING_REINSPECTION",
+                currentIds.has(action.inspection_id) && action.lifecycle_state === "AWAITING_REINSPECTION",
             ).length,
           },
         ].map((metric) => (
@@ -1349,7 +1399,8 @@ export function OperationsWorkspace({ token }: { token: string }) {
           </div>
         ))}
       </div>
-      <Surface title="Operator task queue" subtitle="Saved AI requests, supervisor decisions, operator work, and new evidence. Only recorded tasks appear here."
+      <div id="operator-tasks" />
+      <Surface className="operations-tasks-panel" title="Operator task queue" subtitle="Recorded tasks needing assignment, approval, evidence, or follow-up."
         action={<span className="count-badge">{taskQuery.data?.length ?? "—"}</span>}>
         <div className="operator-task-filters" role="toolbar" aria-label="Filter operator tasks">
           {taskViews.map((view) => <button key={view} type="button" aria-pressed={taskFilter === view}
@@ -1358,17 +1409,20 @@ export function OperationsWorkspace({ token }: { token: string }) {
           </button>)}
         </div>
         {taskQuery.isPending ? <Pending /> : taskQuery.isError ? <LoadError error={taskQuery.error} retry={() => taskQuery.refetch()} /> :
-          visibleTasks.length ? <div className="operator-task-list">{visibleTasks.map((task) =>
+          visibleTasks.length ? <div className="operator-task-list">{displayedTasks.map((task) =>
             <OperatorTaskCard key={task.id} task={task} token={token}
               remainingRequests={budget.data?.remaining_requests ?? 0} />)}</div> :
           <p className="operations-empty-copy">No recorded tasks in this queue.</p>}
+        {visibleTasks.length > 6 && <button className="operations-show-more" type="button" onClick={() => setShowAllTasks((value) => !value)}>
+          {showAllTasks ? "Show fewer tasks" : `Show ${visibleTasks.length - 6} more tasks`}</button>}
       </Surface>
       <Surface
-        title="Investigations"
-        subtitle="Persisted decisions and read-tool activity from actual inspection evidence."
+        className="operations-results-panel"
+        title="Current inspection results"
+        subtitle="Latest investigations per order; historical results are archived below."
         action={
           <span className="count-badge">
-            {q.isSuccess ? investigations.length : "—"}
+            {q.isSuccess ? currentInvestigations.length : "—"}
           </span>
         }
       >
@@ -1376,18 +1430,15 @@ export function OperationsWorkspace({ token }: { token: string }) {
           <Pending />
         ) : q.isError ? (
           <LoadError error={q.error} retry={() => q.refetch()} />
-        ) : investigations.length ? (
+        ) : currentInvestigations.length ? (
           <div className="investigation-grid">
-            {investigations.map((i) => (
+            {displayedResults.map((i) => (
               <InvestigationCard
                 key={i.id}
                 inspection={i}
                 token={token}
-                order={orders.data?.find((o) => o.id === i.order_id)}
-                isCurrent={
-                  orders.data?.find((o) => o.id === i.order_id)
-                    ?.latest_inspection_id === i.id
-                }
+                order={orderById.get(i.order_id)}
+                isCurrent
               />
             ))}
           </div>
@@ -1409,7 +1460,14 @@ export function OperationsWorkspace({ token }: { token: string }) {
             </Button>
           </div>
         )}
+        {currentInvestigations.length > 6 && <button className="operations-show-more" type="button" onClick={() => setShowAllResults((value) => !value)}>
+          {showAllResults ? "Show fewer results" : `Show ${currentInvestigations.length - 6} more results`}</button>}
       </Surface>
+      {historicalInvestigations.length > 0 && <details className="operations-archive">
+        <summary>Past investigations <span>{historicalInvestigations.length} records</span></summary>
+        <div className="investigation-grid">{historicalInvestigations.map((i) =>
+          <InvestigationCard key={i.id} inspection={i} token={token} order={orderById.get(i.order_id)} isCurrent={false} />)}</div>
+      </details>}
       {orders.isError && (
         <LoadError error={orders.error} retry={() => orders.refetch()} />
       )}
@@ -1423,7 +1481,9 @@ export function OperationsWorkspace({ token }: { token: string }) {
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
             >
-              <option value="ALL">All actions</option>
+              <option value="ATTENTION">Needs attention now</option>
+              <option value="FOLLOWUP">Awaiting new photo</option>
+              <option value="ALL">All actions and history</option>
               <option value="REVIEW">Awaiting approval</option>
               <option value="APPROVED">Approved</option>
               <option value="EXECUTED">Executed</option>
@@ -1435,7 +1495,7 @@ export function OperationsWorkspace({ token }: { token: string }) {
             <div className="action-filter-note">
               <span>Showing linked action</span>
               <Link className="text-link" to="/operations">
-                Show all actions
+                Close focused action
               </Link>
             </div>
           )}
@@ -1445,12 +1505,12 @@ export function OperationsWorkspace({ token }: { token: string }) {
             <LoadError error={q.error} retry={() => q.refetch()} />
           ) : actions.length ? (
             <div className="results-content">
-              {actions.map(({ action, inspection }) => (
+              {displayedActions.map(({ action, inspection }) => (
                 <CorrectiveActionCard
                   key={action.id}
                   action={action}
                   inspection={inspection}
-                  order={orders.data?.find((o) => o.id === inspection.order_id)}
+                  order={orderById.get(inspection.order_id)}
                   token={token}
                 />
               ))}
@@ -1467,6 +1527,8 @@ export function OperationsWorkspace({ token }: { token: string }) {
               </p>
             </div>
           )}
+          {!selectedAction && actions.length > 6 && <button className="operations-show-more" type="button" onClick={() => setShowAllActions((value) => !value)}>
+            {showAllActions ? "Show fewer actions" : `Show ${actions.length - 6} more actions`}</button>}
         </Surface>
         <Surface
           title="Agent activity & audit"
@@ -1478,9 +1540,11 @@ export function OperationsWorkspace({ token }: { token: string }) {
           ) : audit.isError ? (
             <LoadError error={audit.error} retry={() => audit.refetch()} />
           ) : (
-            <RecordedTimeline events={audit.data} />
+            <details className="operations-audit-archive"><summary>Open recorded activity <span>{audit.data?.length ?? 0} events</span></summary>
+              <RecordedTimeline events={audit.data ?? []} /></details>
           )}
         </Surface>
+      </div>
       </div>
     </>
   );

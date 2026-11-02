@@ -302,3 +302,17 @@
 - Added an idempotent installer that validates the four PNGs, copies them to versioned local data filenames, updates only the four IMG product reference paths/descriptions, and records four audit events. Backed up ignored local SQLite to data/proofsight.pre-img-ref-v2.db first.
 - Confirmed all four references resolve inside Docker, the green reference API returns HTTP 200, and previous inspections are unchanged. This is a data-quality improvement, not a measured live inference gain; no Meta request was made.
 
+
+# 2026-11-02 — Local test order creation
+
+- Investigated the latest IMG-ORDER-002 inspection: four v2 references are registered, but Muse returned zero observations and SAM returned zero regions. The cause of the empty model result remains unproven; reference quality alone did not resolve it.
+- Added an authenticated Orders form and API endpoint to create a local test manifest with 1–4 products, one rights-cleared reference image per product, SKU, name, color, quantity, and optional visible-SKU declaration. The created order opens in the existing inspection workflow for separate scene upload.
+- Isolated each new order's product catalog for inference. Validated image content, manifest fields, rights confirmation, idempotency, SKU/reference uniqueness, and recorded an audit event. Creation alone does not claim a visual match or trigger Meta inference.
+- Updated an outdated demo-asset test to accept existing ten-order synthetic assets alongside claude-prefixed assets. Verification: `python -m pytest tests -q --disable-warnings` passed 184 tests and 45 subtests; frontend production build passed; Docker backend and frontend became healthy/started; `/orders` returned HTTP 200 and `/api/health` returned `ok`. No live Meta requests were made.
+
+# 2026-11-02 — AI Operations navigation and triage
+
+- Investigated a real approval link and persisted records: the link set the action query/hash, but the action remained below long task and investigation lists; filters could hide the linked card. The local data contained 52 action records, only 18 attached to current inspections, plus 10 operator tasks. Historical records remain preserved.
+- Made linked actions override list filters and scroll into view, including repeated clicks on an already selected action. Prioritized current approval and execution decisions, added separate new-photo and history filters, limited default cards with explicit show-more controls, and collapsed historical investigations, audit activity, task evidence, and detailed findings.
+- Added outcome-specific next-step links and type-specific approval/execution labels. Buttons still call the existing deterministic server policy; no approval or execution was triggered during this change.
+- Verification: frontend Vitest suite passed 35 tests in 9 files; TypeScript/Vite production build passed; Docker frontend started with a healthy backend; local `/operations` returned HTTP 200 and `/api/health` returned `ok`. In the browser with existing operator session, the default view showed six action cards, six current-result cards, and six task cards; clicking a recorded Review approval action focused its card and exposed its active approval control. No approval, execution, or Meta request was made.
