@@ -328,3 +328,21 @@
 - Investigated the saved META-001 live inspection without altering its historical photo or result. Muse read YELLOW-POUCH, and SAM found its region, but their boxes had IoU 0.283, below the previous association threshold. The second blue region remained an unconfirmed candidate while the old result claimed SHORTFALL.
 - Added a constrained shifted-box association for a unique, strongly aligned region and suppressed SHORTFALL when a required SKU has an unconfirmed candidate region or observation. An offline replay of the saved Muse observations and SAM regions now yields BLUE-BOX UNCERTAIN, RED-CAN MATCHED, YELLOW-POUCH MATCHED, and overall NEEDS_REVIEW. This replay made no Meta request and did not rewrite the historical inspection.
 - Added regression tests; all backend tests passed: 186 tests and 45 subtests. No new live Meta requests were made.
+
+# 2026-11-03 — Local inspection image archive and reset
+
+- Exported 36 original inspection images with order-reference, inspection-ID, and photo-ID filenames: 6 historical VERIFIED results under data/inspection_reset/20261103T103845Z/verified and 30 NEEDS_REVIEW or HELD results under review. An index.json records order manifests, source paths, photo IDs, status, and SHA-256 per image.
+- Verified every copied image hash before resetting. Saved an integrity-checked SQLite backup with all 36 original inspection records and preserved the original upload files and active audit ledger.
+- Reset inspection-dependent records and returned all 22 orders to PENDING_INSPECTION. Post-reset verification: 0 active inspections and dependent records, 22 ready orders, valid SQLite integrity and foreign keys, 36 archived images, and healthy local API. No Meta requests were made.
+
+# 2026-11-03 — Second local inspection reset
+
+- Before reset, 4 new inspections existed. Archived all 4 images under data/inspection_reset/20261103T105214Z with order-reference, inspection-ID, and photo-ID filenames: 2 historical VERIFIED and 2 review results. Verified each copied image SHA-256 and made an integrity-checked SQLite backup containing the 4 pre-reset inspections.
+- Reset inspection-dependent records again; all 22 orders are PENDING_INSPECTION, and active inspection and dependent table counts are zero. SQLite integrity and foreign keys passed; local API returned HTTP 200. The previous 36-image archive remains intact. No Meta requests were made.
+
+# 2026-11-03 — TEN-ORDER-05 coordinate-grounding correction
+
+- Investigated the new live TEN-ORDER-05 inspection: Muse returned four individually labeled observations, but its X boxes were effectively in a 900-wide coordinate frame while the 1200x900 scene and SAM boxes used 1200-wide coordinates. The prior grounding accepted two matches, including one shifted to the wrong green unit, and left the other two regions unidentified.
+- Added a scene-wide X normalization candidate for landscape images. It is selected only when at least three source boxes exist and scaling explains at least two additional distinct SAM associations; no per-object scale is chosen. Passed actual source dimensions from the provider into grounding.
+- Added a regression test for four adjacent units. Offline replay of saved live Muse and SAM outputs now grounds four distinct regions and reconciles 2 BLUE-BOX plus 2 GREEN-CUBE as VERIFIED. The historical inspection record was not rewritten and no new Meta request was made.
+- Verification: 187 backend tests and 45 subtests passed; local API restarted and health returned HTTP 200.

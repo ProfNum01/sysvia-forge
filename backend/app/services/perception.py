@@ -88,7 +88,8 @@ def build_regions(sam_runs: list[tuple[str | None, dict]]) -> list[dict]:
 
 
 def ground_observations(observations: list[dict], regions: list[dict], products: list[dict],
-                        provider_ok: bool = True) -> list[dict]:
+                        provider_ok: bool = True, image_width: int | None = None,
+                        image_height: int | None = None) -> list[dict]:
     """Accept individually labelled units only after unique scene/SAM agreement.
 
     IoU >= 0.5 is an association threshold, not a confidence score. Aggregate
@@ -103,12 +104,46 @@ def ground_observations(observations: list[dict], regions: list[dict], products:
     only when the catalog explicitly declares that no label is present.
     """
     catalog = {product["id"]: product for product in products}
+    # Muse sometimes reports landscape X coordinates on a height-wide canvas
+    # (for example 900-wide boxes for a 1200x900 scene). Apply a global
+    # correction only when it explains at least two additional distinct SAM
+    # associations. Never choose a different scale independently per object.
+    x_scale = 1.0
+    if (image_width and image_height and image_width > image_height
+            and image_width / image_height <= 2
+            and sum(_valid_box(row.get("source_box")) for row in observations) >= 3
+            and all(not _valid_box(row.get("source_box")) or row["source_box"]["right"] <= image_height
+                    for row in observations)):
+        candidate_scale = image_width / image_height
+
+        def association_count(scale: float) -> int:
+            claims = []
+            for row in observations:
+                box = row.get("source_box")
+                pid = row.get("product_id") or row.get("visual_candidate_product_id")
+                if not _valid_box(box) or not pid:
+                    continue
+                scaled = {**box, "left": box["left"] * scale, "right": box["right"] * scale}
+                matches = [region["id"] for region in regions
+                           if region.get("candidate_product_id") == pid
+                           and _same_unit_location(scaled, region["box"])]
+                if len(matches) == 1:
+                    claims.append(matches[0])
+            counts = Counter(claims)
+            return sum(count == 1 for count in counts.values())
+
+        if association_count(candidate_scale) >= association_count(1.0) + 2:
+            x_scale = candidate_scale
     proposed: list[str | None] = []
     for row in observations:
         product_id = row.get("product_id")
         visual_cand = row.get("visual_candidate_product_id")
         product = catalog.get(product_id)
         no_sku = product is not None and _no_sku_label(product)
+        source_box = row.get("source_box")
+        if x_scale != 1.0 and _valid_box(source_box):
+            source_box = {**source_box, "left": source_box["left"] * x_scale,
+                          "right": source_box["right"] * x_scale}
 
         # ── Standard SKU-label path ──────────────────────────────────────────
         eligible = (provider_ok and product is not None
@@ -137,7 +172,7 @@ def ground_observations(observations: list[dict], regions: list[dict], products:
         matches = []
         if eligible:
             for region in regions:
-                if region["candidate_product_id"] != product_id or not _same_unit_location(row["source_box"], region["box"]):
+                if region["candidate_product_id"] != product_id or not _same_unit_location(source_box, region["box"]):
                     continue
                 conflicts = any(other["id"] != region["id"] and other["candidate_product_id"] != product_id
                                 and _iou(region["box"], other["box"]) >= 0.5 for other in regions)
@@ -149,7 +184,7 @@ def ground_observations(observations: list[dict], regions: list[dict], products:
             for region in regions:
                 if region["candidate_product_id"] != product_id:
                     continue
-                if not _same_unit_location(row["source_box"], region["box"]):
+                if not _same_unit_location(source_box, region["box"]):
                     continue
                 conflicts = any(other["id"] != region["id"] and other["candidate_product_id"] != product_id
                                 and _iou(region["box"], other["box"]) >= 0.5 for other in regions)

@@ -4,6 +4,7 @@ import asyncio
 import os
 from pathlib import Path
 from typing import Callable
+from PIL import Image
 
 from backend.app.services.perception import build_regions, ground_observations
 from proofsight.meta_api import MetaConfig, MuseSparkService, SamSegmentationService, create_muse_client, create_sam_client
@@ -76,5 +77,8 @@ def run_visual_models(image_path: str, products: list[dict], annotation_path: Pa
            "http_status": failed.get("http_status") if failed else 200 if runs else None,
            "error": error, "requests": len(runs)}
     regions = build_regions(runs)
-    observations = ground_observations(muse.get("observations", []), regions, products, provider_ok=sam["ok"])
+    with Image.open(image_path) as scene:
+        scene_width, scene_height = scene.size
+    observations = ground_observations(muse.get("observations", []), regions, products, provider_ok=sam["ok"],
+                                       image_width=scene_width, image_height=scene_height)
     return {"muse": muse, "sam": sam, "regions": regions, "observations": observations}

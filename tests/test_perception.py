@@ -32,6 +32,29 @@ def segmentation(boxes=None, ok=True):
 
 
 class GroundingTests(unittest.TestCase):
+    def test_landscape_width_normalization_requires_global_region_agreement(self):
+        boxes = [
+            ("p1", {"left": 90, "top": 205, "right": 235, "bottom": 395},
+             {"left": 116, "top": 185, "right": 311, "bottom": 365}),
+            ("p1", {"left": 275, "top": 205, "right": 425, "bottom": 395},
+             {"left": 366, "top": 185, "right": 561, "bottom": 365}),
+            ("p2", {"left": 465, "top": 205, "right": 630, "bottom": 395},
+             {"left": 616, "top": 186, "right": 811, "bottom": 365}),
+            ("p2", {"left": 670, "top": 205, "right": 830, "bottom": 395},
+             {"left": 866, "top": 185, "right": 1061, "bottom": 365}),
+        ]
+        regions = build_regions([
+            (pid, segmentation([{"object_id": str(index), **sam} for index, (candidate, _, sam)
+                                in enumerate(boxes) if candidate == pid]))
+            for pid in ("p1", "p2")
+        ])
+        rows = [observation(pid, box=source) for pid, source, _ in boxes]
+        result = ground_observations(rows, regions, CATALOG, image_width=1200, image_height=900)
+        self.assertEqual([row["identification_status"] for row in result], ["MATCHED"] * 4)
+        self.assertEqual(len({row["evidence_region_ids"][0] for row in result}), 4)
+        self.assertEqual([row["evidence_region_ids"][0] for row in result],
+                         ["region-p1-0", "region-p1-1", "region-p2-2", "region-p2-3"])
+
     def test_exact_scene_sku_and_unique_sam_overlap_ground_one_unit(self):
         regions = build_regions([("p1", segmentation())])
         result = ground_observations([observation()], regions, CATALOG)
