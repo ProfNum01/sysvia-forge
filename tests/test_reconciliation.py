@@ -31,6 +31,17 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(result["reconciliation_status"], "MISMATCH_DETECTED")
         self.assertFalse(result["verified"])
 
+    def test_unconfirmed_candidate_for_required_product_prevents_shortfall_claim(self):
+        evidence = regions()
+        evidence.append({"id": "red-1", "product_id": None, "candidate_product_id": "red",
+                         "box": {"left": 20, "top": 0, "right": 30, "bottom": 10}})
+        result = self.run_reconcile(observations(), evidence)
+        row = result["comparison"][0]
+        self.assertEqual(row["status"], "UNCERTAIN")
+        self.assertIsNone(row["observed_quantity"])
+        self.assertIsNone(row["difference"])
+        self.assertEqual(result["reconciliation_status"], "NEEDS_REVIEW")
+
     def test_distinct_supported_units_can_verify(self):
         result = self.run_reconcile(observations(count=2), regions(count=2))
         self.assertTrue(result["verified"])

@@ -35,10 +35,14 @@ def _same_unit_location(source: dict, region: dict) -> bool:
     """
     if _iou(source, region) >= 0.5:
         return True
-    if _iou(source, region) < 0.4:
-        return False
     horizontal = max(0.0, min(source["right"], region["right"]) - max(source["left"], region["left"]))
     vertical = max(0.0, min(source["bottom"], region["bottom"]) - max(source["top"], region["top"]))
+    if _iou(source, region) >= 0.25 and (
+            horizontal / min(source["right"] - source["left"], region["right"] - region["left"]) >= 0.65
+            and vertical / min(source["bottom"] - source["top"], region["bottom"] - region["top"]) >= 0.75):
+        return True
+    if _iou(source, region) < 0.4:
+        return False
     return (horizontal / min(source["right"] - source["left"], region["right"] - region["left"]) >= 0.85
             and vertical / min(source["bottom"] - source["top"], region["bottom"] - region["top"]) >= 0.6)
 

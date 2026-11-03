@@ -123,7 +123,12 @@ def reconcile(expected: list[dict], observations: list[dict], geometry_available
         rows.append({"product_id": pid, "sku": product["sku"], "name": product.get("name", product["sku"]), "quantity": 0})
     for item in rows:
         matches = [o for o in normalized if o["product_id"] == item["product_id"]]
-        known_count = bool(matches) and all(o["identification_status"] == "MATCHED" for o in matches)
+        candidate_regions = any(r.get("candidate_product_id") == item["product_id"]
+                                and r.get("product_id") != item["product_id"] for r in regions)
+        candidate_observations = any(o.get("visual_candidate_product_id") == item["product_id"]
+                                     and o["identification_status"] != "MATCHED" for o in normalized)
+        known_count = (bool(matches) and all(o["identification_status"] == "MATCHED" for o in matches)
+                       and not candidate_regions and not candidate_observations)
         qty = sum(o["quantity"] for o in matches) if known_count else None
         difference = qty-item["quantity"] if qty is not None else None
         ids = [rid for o in matches for rid in o["evidence_region_ids"]]

@@ -316,3 +316,15 @@
 - Made linked actions override list filters and scroll into view, including repeated clicks on an already selected action. Prioritized current approval and execution decisions, added separate new-photo and history filters, limited default cards with explicit show-more controls, and collapsed historical investigations, audit activity, task evidence, and detailed findings.
 - Added outcome-specific next-step links and type-specific approval/execution labels. Buttons still call the existing deterministic server policy; no approval or execution was triggered during this change.
 - Verification: frontend Vitest suite passed 35 tests in 9 files; TypeScript/Vite production build passed; Docker frontend started with a healthy backend; local `/operations` returned HTTP 200 and `/api/health` returned `ok`. In the browser with existing operator session, the default view showed six action cards, six current-result cards, and six task cards; clicking a recorded Review approval action focused its card and exposed its active approval control. No approval, execution, or Meta request was made.
+
+# 2026-11-03 — META synthetic order manifests
+
+- Registered local META-001 with 2 BLUE-BOX, 1 RED-CAN, and 1 YELLOW-POUCH by reusing the synthetic product catalog and reference images of CLAUDE-MISSING-001.
+- Registered local META-002 with 3 BLUE-BOX, 2 RED-CAN, and 2 YELLOW-POUCH using those same product records and references. Both orders start PENDING_INSPECTION; no scene image, inspection, verification, or Meta request was created.
+- Added an idempotent registration script with source-catalog validation and audit events. Ran it twice: 2 orders created, then 0 on repeat; queried both stored manifests and statuses.
+
+# 2026-11-03 — Conservative META inspection grounding
+
+- Investigated the saved META-001 live inspection without altering its historical photo or result. Muse read YELLOW-POUCH, and SAM found its region, but their boxes had IoU 0.283, below the previous association threshold. The second blue region remained an unconfirmed candidate while the old result claimed SHORTFALL.
+- Added a constrained shifted-box association for a unique, strongly aligned region and suppressed SHORTFALL when a required SKU has an unconfirmed candidate region or observation. An offline replay of the saved Muse observations and SAM regions now yields BLUE-BOX UNCERTAIN, RED-CAN MATCHED, YELLOW-POUCH MATCHED, and overall NEEDS_REVIEW. This replay made no Meta request and did not rewrite the historical inspection.
+- Added regression tests; all backend tests passed: 186 tests and 45 subtests. No new live Meta requests were made.

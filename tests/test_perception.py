@@ -78,6 +78,14 @@ class GroundingTests(unittest.TestCase):
         regions = build_regions([("p1", segmentation([{"object_id": "0", **weak}]))])
         self.assertEqual(ground_observations([observation(box=source)], regions, CATALOG)[0]["identification_status"], "UNCERTAIN")
 
+    def test_shifted_labeled_pouch_with_unique_sam_region_matches(self):
+        source = {"left": 407, "top": 308, "right": 499, "bottom": 464}
+        sam = {"left": 439, "top": 343, "right": 559, "bottom": 498}
+        regions = build_regions([("p1", segmentation([{"object_id": "0", **sam}]))])
+        result = ground_observations([observation(box=source)], regions, CATALOG)
+        self.assertEqual(result[0]["identification_status"], "MATCHED")
+        self.assertEqual(result[0]["evidence_region_ids"], ["region-p1-0"])
+
     def test_duplicate_model_claims_cannot_count_one_region_twice(self):
         regions = build_regions([("p1", segmentation())])
         result = ground_observations([observation(), observation()], regions, CATALOG)
