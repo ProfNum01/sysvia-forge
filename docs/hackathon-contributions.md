@@ -346,3 +346,8 @@
 - Added a scene-wide X normalization candidate for landscape images. It is selected only when at least three source boxes exist and scaling explains at least two additional distinct SAM associations; no per-object scale is chosen. Passed actual source dimensions from the provider into grounding.
 - Added a regression test for four adjacent units. Offline replay of saved live Muse and SAM outputs now grounds four distinct regions and reconciles 2 BLUE-BOX plus 2 GREEN-CUBE as VERIFIED. The historical inspection record was not rewritten and no new Meta request was made.
 - Verification: 187 backend tests and 45 subtests passed; local API restarted and health returned HTTP 200.
+
+# 2026-11-03 — Third local inspection reset for demo recording
+
+- Archived 5 new inspection images under data/inspection_reset/20261103T111341Z with order-reference, inspection-ID, and photo-ID filenames: 2 historical VERIFIED and 3 review results. Verified each copied image SHA-256 and an integrity-checked SQLite backup containing the 5 pre-reset inspections.
+- Reset inspection-dependent records; all 22 orders are PENDING_INSPECTION and active inspection and dependent table counts are zero. SQLite integrity and foreign keys passed; local API restarted and returned HTTP 200. Previous archives remain intact. No Meta request was made by this reset.
